@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#111827">
+    <title>Ricambi Delivery</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Centro Ricambi Auto</p>
+          <h1>Consegne</h1>
+        </div>
+        <div class="status-dot" aria-label="Sistema attivo"></div>
+      </header>
+
+      <nav class="role-tabs" aria-label="Seleziona vista">
+        <button class="tab is-active" data-view="customer" type="button">Cliente</button>
+        <button class="tab" data-view="rider" type="button">Rider</button>
+        <button class="tab" data-view="shop" type="button">Negozio</button>
+      </nav>
+
+      <section class="view is-active" id="customer-view" aria-labelledby="customer-title">
+        <div class="customer-login panel" id="customer-login-panel">
+          <div class="brand-mark" aria-hidden="true">RD</div>
+          <div>
+            <p class="eyebrow">Accesso cliente</p>
+            <h2>Ricambi Delivery</h2>
+          </div>
+          <form class="login-form" id="customer-login-form">
+            <div>
+              <label for="customer-name">Nome officina o cliente</label>
+              <input id="customer-name" name="name" autocomplete="name" placeholder="Es. Officina Rossi" required>
+            </div>
+            <div>
+              <label for="customer-phone">Telefono</label>
+              <input id="customer-phone" name="phone" autocomplete="tel" inputmode="tel" placeholder="Es. 333 123 4567" required>
+            </div>
+            <button type="submit">Entra</button>
+          </form>
+        </div>
+
+        <div class="account-bar panel" id="customer-account" hidden>
+          <div>
+            <p class="eyebrow">Cliente collegato</p>
+            <strong id="customer-account-name"></strong>
+          </div>
+          <button class="ghost-button" id="customer-logout" type="button">Esci</button>
+        </div>
+
+        <div class="panel hero-panel">
+          <div>
+            <p class="eyebrow">Traccia ordine</p>
+            <h2 id="customer-title">Dov'e la consegna?</h2>
+          </div>
+          <form class="search-form" id="order-search">
+            <label for="order-code">Numero ordine</label>
+            <div class="inline-field">
+              <input id="order-code" name="order-code" autocomplete="off" placeholder="Es. ORD-1024">
+              <button type="submit">Cerca</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="customer-result" class="stack"></div>
+      </section>
+
+      <section class="view" id="rider-view" aria-labelledby="rider-title">
+        <div class="staff-login panel" id="rider-login-panel">
+          <div class="brand-mark" aria-hidden="true">R</div>
+          <div>
+            <p class="eyebrow">Accesso rider</p>
+            <h2>Entra con PIN</h2>
+          </div>
+          <form class="pin-form" id="rider-login-form">
+            <div>
+              <label for="rider-pin">PIN rider</label>
+              <input id="rider-pin" name="pin" autocomplete="off" inputmode="numeric" maxlength="6" placeholder="Es. 2222" required>
+            </div>
+            <button type="submit">Entra</button>
+          </form>
+          <p class="form-error" id="rider-login-error" hidden>PIN non corretto.</p>
+        </div>
+
+        <div class="protected-area" id="rider-protected" hidden>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Area rider</p>
+              <h2 id="rider-title">Consegne assegnate</h2>
+            </div>
+            <div class="head-actions">
+              <select id="rider-filter" aria-label="Filtra rider">
+                <option value="all">Tutti</option>
+              </select>
+              <button class="ghost-button" id="rider-logout" type="button">Esci</button>
+            </div>
+          </div>
+          <div id="rider-list" class="stack"></div>
+        </div>
+      </section>
+
+      <section class="view" id="shop-view" aria-labelledby="shop-title">
+        <div class="staff-login panel" id="shop-login-panel">
+          <div class="brand-mark" aria-hidden="true">N</div>
+          <div>
+            <p class="eyebrow">Accesso negozio</p>
+            <h2>Area riservata</h2>
+          </div>
+          <form class="pin-form" id="shop-login-form">
+            <div>
+              <label for="shop-pin">PIN negozio</label>
+              <input id="shop-pin" name="pin" autocomplete="off" inputmode="numeric" maxlength="6" placeholder="Es. 9999" required>
+            </div>
+            <button type="submit">Entra</button>
+          </form>
+          <p class="form-error" id="shop-login-error" hidden>PIN non corretto.</p>
+        </div>
+
+        <div class="protected-area" id="shop-protected" hidden>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Banco negozio</p>
+              <h2 id="shop-title">Gestione ordini</h2>
+            </div>
+            <div class="head-actions">
+              <button class="ghost-button" id="reset-demo" type="button">Ripristina demo</button>
+              <button class="ghost-button" id="shop-logout" type="button">Esci</button>
+            </div>
+          </div>
+
+          <form class="panel order-form" id="new-order-form">
+            <div>
+              <label for="new-code">Ordine</label>
+              <input id="new-code" name="code" placeholder="ORD-1027" required>
+            </div>
+            <div>
+              <label for="new-client">Cliente</label>
+              <input id="new-client" name="client" placeholder="Officina Rossi" required>
+            </div>
+            <div>
+              <label for="new-phone">Telefono cliente</label>
+              <input id="new-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="333 123 4567">
+            </div>
+            <div>
+              <label for="new-address">Indirizzo</label>
+              <input id="new-address" name="address" placeholder="Via Roma 12, Caserta" required>
+            </div>
+            <div>
+              <label for="new-rider">Rider</label>
+              <select id="new-rider" name="rider" required></select>
+            </div>
+            <button type="submit">Crea consegna</button>
+          </form>
+
+          <div id="shop-list" class="stack"></div>
+        </div>
+      </section>
+    </main>
+
+    <template id="order-card-template">
+      <article class="order-card">
+        <div class="card-top">
+          <div>
+            <p class="order-code"></p>
+            <h3 class="client-name"></h3>
+          </div>
+          <span class="badge"></span>
+        </div>
+        <p class="address"></p>
+        <div class="progress">
+          <div class="progress-fill"></div>
+        </div>
+        <ol class="steps"></ol>
+        <div class="map">
+          <div class="map-grid"></div>
+          <div class="shop-pin">N</div>
+          <div class="client-pin">C</div>
+          <div class="rider-pin">R</div>
+        </div>
+        <div class="meta-row"></div>
+        <div class="actions"></div>
+      </article>
+    </template>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
