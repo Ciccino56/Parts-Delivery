@@ -25,7 +25,8 @@ Ordini demo:
 - Vista rider con avanzamento stato consegna.
 - Vista negozio per creare ordini, copiare il link cliente e aprire WhatsApp con messaggio pronto.
 - Stati consegna: da ritirare, ritirato, in consegna, sta arrivando, consegnato.
-- Mappa dimostrativa con avanzamento visivo del rider.
+- Mappa reale OpenStreetMap con posizione GPS del rider quando attiva.
+- Pulsante rider `Condividi GPS` per inviare la posizione in tempo reale al cliente.
 - Dati salvati nel browser per provare il flusso senza server.
 - Schema iniziale Supabase in `supabase-schema.sql`.
 - Migrazione accesso negozio in `supabase-shop-auth.sql`.
@@ -37,7 +38,7 @@ Per metterla in produzione servono:
 - database condiviso, per esempio Supabase o Firebase;
 - login rider;
 - pannello negozio protetto;
-- posizione GPS reale del rider durante la consegna;
+- rotta stradale ed ETA automatico stile Glovo;
 - link cliente inviabile via WhatsApp o SMS;
 - dominio pubblico HTTPS.
 

@@ -2,8 +2,8 @@ $ErrorActionPreference = "Stop"
 
 Set-Location -LiteralPath $PSScriptRoot
 
-git add app.js config.js index.html README.md sw.js supabase-shop-auth.sql publish-fix.ps1
-git commit -m "Add shop email login"
+git add app.js config.js index.html styles.css README.md sw.js supabase-shop-auth.sql publish-fix.ps1 PUBBLICA-CORREZIONE.bat
+git commit -m "Add live rider tracking"
 git push
 
 Write-Host ""

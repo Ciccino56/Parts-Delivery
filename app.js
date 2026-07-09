@@ -12,6 +12,12 @@ const statuses = [
   { key: "delivered", label: "Consegnato", progress: 100 }
 ];
 
+const shopLocation = {
+  label: "Negozio",
+  lat: 41.0723,
+  lng: 14.3320
+};
+
 const seedOrders = [
   {
     code: "ORD-1024",
@@ -48,7 +54,8 @@ const state = {
   shopSession: loadShopSession(),
   orders: loadOrders(),
   loading: false,
-  online: isSupabaseReady()
+  online: isSupabaseReady(),
+  locationSharing: null
 };
 
 const qs = (selector, root = document) => root.querySelector(selector);
@@ -146,7 +153,10 @@ function mapSupabaseOrder(row) {
     address: row.delivery_address,
     rider: row.rider_name || "Da assegnare",
     status: row.status,
-    updatedAt: Date.parse(row.updated_at || row.created_at || new Date().toISOString())
+    updatedAt: Date.parse(row.updated_at || row.created_at || new Date().toISOString()),
+    lat: row.last_lat === null || row.last_lat === undefined ? null : Number(row.last_lat),
+    lng: row.last_lng === null || row.last_lng === undefined ? null : Number(row.last_lng),
+    locationAt: row.last_location_at ? Date.parse(row.last_location_at) : null
   };
 }
 
@@ -168,6 +178,9 @@ function canCustomerViewOrder(order) {
 function mapOrderPatchForSupabase(patch) {
   const mapped = { updated_at: new Date().toISOString() };
   if (patch.status) mapped.status = patch.status;
+  if (typeof patch.lat === "number") mapped.last_lat = patch.lat;
+  if (typeof patch.lng === "number") mapped.last_lng = patch.lng;
+  if (patch.locationAt) mapped.last_location_at = patch.locationAt;
   if (patch.status === "delivered") mapped.delivered_at = new Date().toISOString();
   return mapped;
 }
@@ -275,10 +288,19 @@ function statusMeta(key) {
 }
 
 function timeAgo(timestamp) {
+  if (!timestamp) return "mai";
   const minutes = Math.max(1, Math.round((Date.now() - timestamp) / 60000));
   if (minutes < 60) return `${minutes} min fa`;
   const hours = Math.round(minutes / 60);
   return `${hours} ore fa`;
+}
+
+function hasLiveLocation(order) {
+  return Number.isFinite(order.lat) && Number.isFinite(order.lng);
+}
+
+function isSharingLocationFor(code) {
+  return state.locationSharing?.code === code;
 }
 
 function setActiveView(view) {
@@ -431,10 +453,12 @@ function renderOrderCard(order, mode) {
   });
 
   positionRider(qs(".rider-pin", card), meta.progress);
+  renderLiveMap(qs(".map", card), order);
 
   const metaRow = qs(".meta-row", card);
   metaRow.append(createPill(`Rider: ${order.rider}`));
   metaRow.append(createPill(`Aggiornato: ${timeAgo(order.updatedAt)}`));
+  metaRow.append(createPill(hasLiveLocation(order) ? `GPS: ${timeAgo(order.locationAt)}` : "GPS: in attesa"));
   if (mode === "customer" && state.customer) {
     metaRow.append(createPill(`Cliente: ${state.customer.name}`));
   }
@@ -469,6 +493,15 @@ function createButton(label, variant, onClick) {
 function renderRiderActions(container, order) {
   const currentIndex = statusIndex(order.status);
   const next = statuses[currentIndex + 1];
+  const isDelivered = order.status === "delivered";
+
+  if (!isDelivered) {
+    if (isSharingLocationFor(order.code)) {
+      container.append(createButton("Stop GPS", "secondary", stopLocationSharing));
+    } else {
+      container.append(createButton("Condividi GPS", "", () => startLocationSharing(order)));
+    }
+  }
 
   if (next) {
     container.append(createButton(next.label, "", () => updateOrder(order.code, { status: next.key })));
@@ -495,7 +528,141 @@ function positionRider(pin, progress) {
   pin.style.bottom = `${y}%`;
 }
 
+function renderLiveMap(container, order) {
+  if (!window.L) return;
+
+  const hasLocation = hasLiveLocation(order);
+  const riderLocation = hasLocation ? [order.lat, order.lng] : [shopLocation.lat, shopLocation.lng];
+
+  container.classList.add("live-map");
+  container.innerHTML = "";
+
+  window.setTimeout(() => {
+    if (!container.isConnected || container.offsetParent === null) return;
+
+    const map = L.map(container, {
+      zoomControl: false,
+      attributionControl: false,
+      dragging: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      tap: false
+    }).setView(riderLocation, hasLocation ? 15 : 12);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19
+    }).addTo(map);
+
+    L.circleMarker([shopLocation.lat, shopLocation.lng], {
+      radius: 8,
+      color: "#111827",
+      fillColor: "#111827",
+      fillOpacity: 1,
+      weight: 2
+    }).addTo(map).bindTooltip("Negozio");
+
+    if (hasLocation) {
+      L.circleMarker(riderLocation, {
+        radius: 10,
+        color: "#ffffff",
+        fillColor: "#e11d48",
+        fillOpacity: 1,
+        weight: 3
+      }).addTo(map).bindTooltip(`Rider ${order.rider}`);
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "map-empty";
+      empty.textContent = "GPS rider in attesa";
+      container.append(empty);
+    }
+  }, 0);
+}
+
+async function updateOrderLocation(code, coords) {
+  const patch = {
+    lat: Number(coords.latitude.toFixed(6)),
+    lng: Number(coords.longitude.toFixed(6)),
+    locationAt: new Date().toISOString()
+  };
+
+  const order = state.orders.find((item) => item.code === code);
+  if (order && order.status !== "delivered" && statusIndex(order.status) < statusIndex("moving")) {
+    patch.status = "moving";
+  }
+
+  if (isSupabaseReady()) {
+    await supabaseRequest(`orders?code=eq.${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      body: mapOrderPatchForSupabase(patch)
+    });
+    await refreshOrders({ silent: true, reportErrors: false });
+    return;
+  }
+
+  const orders = state.orders.map((item) => (
+    item.code === code
+      ? { ...item, ...patch, updatedAt: Date.now() }
+      : item
+  ));
+  saveOrders(orders);
+  renderAll();
+}
+
+function startLocationSharing(order) {
+  if (!navigator.geolocation) {
+    alert("Questo telefono non permette la posizione GPS nel browser.");
+    return;
+  }
+
+  stopLocationSharing({ render: false });
+
+  let firstFix = true;
+  const watchId = navigator.geolocation.watchPosition(
+    async (position) => {
+      try {
+        await updateOrderLocation(order.code, position.coords);
+        if (firstFix) {
+          firstFix = false;
+          alert("GPS attivo. Il cliente ora vede il rider sulla mappa.");
+        }
+      } catch {
+        if (firstFix) {
+          firstFix = false;
+          alert("Non riesco a salvare la posizione online. Riprova tra poco.");
+        }
+      }
+    },
+    () => {
+      alert("Posizione non autorizzata. Sul telefono del rider devi premere Consenti.");
+      stopLocationSharing();
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 15000
+    }
+  );
+
+  state.locationSharing = { code: order.code, watchId };
+  renderAll();
+}
+
+function stopLocationSharing(options = {}) {
+  if (state.locationSharing?.watchId !== undefined) {
+    navigator.geolocation.clearWatch(state.locationSharing.watchId);
+  }
+
+  state.locationSharing = null;
+  if (options.render !== false) renderAll();
+}
+
 async function updateOrder(code, patch) {
+  if (patch.status === "delivered" && isSharingLocationFor(code)) {
+    stopLocationSharing({ render: false });
+  }
+
   if (isSupabaseReady()) {
     try {
       await supabaseRequest(`orders?code=eq.${encodeURIComponent(code)}`, {
@@ -620,7 +787,10 @@ function bootFromUrl() {
 
 function bindEvents() {
   qsa(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => setActiveView(tab.dataset.view));
+    tab.addEventListener("click", () => {
+      setActiveView(tab.dataset.view);
+      renderAll();
+    });
   });
 
   qs("#order-search").addEventListener("submit", (event) => {
@@ -675,7 +845,6 @@ function bindEvents() {
     try {
       await shopLogin(String(data.get("email")).trim(), String(data.get("password")));
       error.hidden = true;
-      form.reset();
       renderAll();
       await refreshOrders({ reportErrors: false });
     } catch (loginError) {
@@ -731,7 +900,7 @@ setInterval(() => {
   if (state.customer && state.selectedOrder && !state.loading) {
     refreshOrders({ silent: true, reportErrors: false });
   }
-}, 8000);
+}, 5000);
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && state.customer && state.selectedOrder) {

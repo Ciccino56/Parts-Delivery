@@ -428,6 +428,31 @@ select {
     #e7eef6;
 }
 
+.map.live-map {
+  height: 210px;
+  background: #e7eef6;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  font: inherit;
+}
+
+.map-empty {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 500;
+  border-radius: 999px;
+  padding: 8px 11px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(17, 24, 39, 0.16);
+}
+
 .map-grid {
   position: absolute;
   inset: 0;
