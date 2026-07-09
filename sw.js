@@ -1,4 +1,4 @@
-const CACHE_NAME = "ricambi-delivery-v17";
+const CACHE_NAME = "ricambi-delivery-v18";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -32,7 +32,7 @@ self.addEventListener("fetch", (event) => {
 
   if (isFreshAsset) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: "reload" })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));

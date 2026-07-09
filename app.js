@@ -342,6 +342,38 @@ function formatDistance(meters) {
   return `${(meters / 1000).toFixed(1).replace(".", ",")} km`;
 }
 
+function distanceInMeters(from, to) {
+  const earthRadius = 6371000;
+  const toRad = (value) => value * Math.PI / 180;
+  const dLat = toRad(to.lat - from.lat);
+  const dLng = toRad(to.lng - from.lng);
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function fallbackEtaText(from, to) {
+  const directDistance = distanceInMeters(from, to);
+  const roadDistance = directDistance * 1.35;
+  const urbanMetersPerSecond = 7.8;
+  return `ETA indicativo ${formatEta(roadDistance / urbanMetersPerSecond)} - ${formatDistance(roadDistance)}`;
+}
+
+async function fetchJson(url, timeoutMs = 6500) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error("Richiesta non disponibile");
+    return response.json();
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function geocodeAddress(address) {
   const query = `${address}, Campania, Italia`;
   const key = routeCacheKey("geo", [query]);
@@ -349,10 +381,7 @@ async function geocodeAddress(address) {
   if (state.routeCache[key]) return state.routeCache[key];
 
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("Geocoding non disponibile");
-
-  const results = await response.json();
+  const results = await fetchJson(url);
   if (!results.length) return null;
 
   const location = {
@@ -379,10 +408,7 @@ async function fetchDrivingRoute(from, to) {
 
   const coords = `${from.lng},${from.lat};${to.lng},${to.lat}`;
   const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("Percorso non disponibile");
-
-  const data = await response.json();
+  const data = await fetchJson(url);
   const firstRoute = data.routes?.[0];
   if (!firstRoute) return null;
 
@@ -701,7 +727,7 @@ async function renderRouteEta(map, container, order, riderLocation) {
 
     const route = await fetchDrivingRoute(riderLocation, destination);
     if (!route || !container.isConnected) {
-      summary.textContent = "ETA non disponibile";
+      summary.textContent = fallbackEtaText(riderLocation, destination);
       return;
     }
 
@@ -718,7 +744,14 @@ async function renderRouteEta(map, container, order, riderLocation) {
 
     summary.textContent = `ETA ${formatEta(route.duration)} - ${formatDistance(route.distance)}`;
   } catch {
-    summary.textContent = "ETA non disponibile";
+    try {
+      const destination = await geocodeAddress(order.address);
+      summary.textContent = destination
+        ? fallbackEtaText(riderLocation, destination)
+        : "ETA non disponibile: controlla indirizzo";
+    } catch {
+      summary.textContent = "ETA non disponibile: controlla indirizzo";
+    }
   }
 }
 
@@ -1035,7 +1068,9 @@ window.addEventListener("storage", (event) => {
 });
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  navigator.serviceWorker.register("./sw.js")
+    .then((registration) => registration.update())
+    .catch(() => {});
 }
 
 setInterval(() => {
