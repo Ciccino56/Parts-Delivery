@@ -2,6 +2,7 @@ const STORAGE_KEY = "ricambi-delivery-orders-v1";
 const CUSTOMER_KEY = "ricambi-delivery-customer-v1";
 const ACCESS_KEY = "ricambi-delivery-access-v1";
 const SHOP_SESSION_KEY = "ricambi-delivery-shop-session-v1";
+const ROUTE_CACHE_KEY = "ricambi-delivery-route-cache-v1";
 
 const riders = ["Marco", "Luca", "Antonio", "Salvatore"];
 const statuses = [
@@ -52,6 +53,7 @@ const state = {
   customer: loadCustomer(),
   access: loadAccess(),
   shopSession: loadShopSession(),
+  routeCache: loadRouteCache(),
   orders: loadOrders(),
   loading: false,
   online: isSupabaseReady(),
@@ -79,6 +81,22 @@ function loadOrders() {
 function saveOrders(orders) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
   state.orders = orders;
+}
+
+function loadRouteCache() {
+  const raw = localStorage.getItem(ROUTE_CACHE_KEY);
+  if (!raw) return {};
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(ROUTE_CACHE_KEY);
+    return {};
+  }
+}
+
+function saveRouteCache() {
+  localStorage.setItem(ROUTE_CACHE_KEY, JSON.stringify(state.routeCache));
 }
 
 function isSupabaseReady() {
@@ -301,6 +319,82 @@ function hasLiveLocation(order) {
 
 function isSharingLocationFor(code) {
   return state.locationSharing?.code === code;
+}
+
+function routeCacheKey(prefix, parts) {
+  return `${prefix}:${parts.map((part) => String(part).trim().toLowerCase()).join("|")}`;
+}
+
+function roundedCoord(value) {
+  return Number(value).toFixed(4);
+}
+
+function formatEta(seconds) {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1).replace(".", ",")} km`;
+}
+
+async function geocodeAddress(address) {
+  const query = `${address}, Campania, Italia`;
+  const key = routeCacheKey("geo", [query]);
+
+  if (state.routeCache[key]) return state.routeCache[key];
+
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Geocoding non disponibile");
+
+  const results = await response.json();
+  if (!results.length) return null;
+
+  const location = {
+    lat: Number(results[0].lat),
+    lng: Number(results[0].lon)
+  };
+
+  if (!Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return null;
+
+  state.routeCache[key] = location;
+  saveRouteCache();
+  return location;
+}
+
+async function fetchDrivingRoute(from, to) {
+  const key = routeCacheKey("route", [
+    roundedCoord(from.lat),
+    roundedCoord(from.lng),
+    roundedCoord(to.lat),
+    roundedCoord(to.lng)
+  ]);
+
+  if (state.routeCache[key]) return state.routeCache[key];
+
+  const coords = `${from.lng},${from.lat};${to.lng},${to.lat}`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Percorso non disponibile");
+
+  const data = await response.json();
+  const firstRoute = data.routes?.[0];
+  if (!firstRoute) return null;
+
+  const route = {
+    duration: firstRoute.duration,
+    distance: firstRoute.distance,
+    points: firstRoute.geometry.coordinates.map(([lng, lat]) => [lat, lng])
+  };
+
+  state.routeCache[key] = route;
+  saveRouteCache();
+  return route;
 }
 
 function setActiveView(view) {
@@ -571,6 +665,10 @@ function renderLiveMap(container, order) {
         fillOpacity: 1,
         weight: 3
       }).addTo(map).bindTooltip(`Rider ${order.rider}`);
+      renderRouteEta(map, container, order, {
+        lat: order.lat,
+        lng: order.lng
+      });
     } else {
       const empty = document.createElement("div");
       empty.className = "map-empty";
@@ -578,6 +676,50 @@ function renderLiveMap(container, order) {
       container.append(empty);
     }
   }, 0);
+}
+
+async function renderRouteEta(map, container, order, riderLocation) {
+  const summary = document.createElement("div");
+  summary.className = "route-summary";
+  summary.textContent = "Calcolo percorso...";
+  container.append(summary);
+
+  try {
+    const destination = await geocodeAddress(order.address);
+    if (!destination || !container.isConnected) {
+      summary.textContent = "ETA non disponibile";
+      return;
+    }
+
+    L.circleMarker([destination.lat, destination.lng], {
+      radius: 9,
+      color: "#ffffff",
+      fillColor: "#16a34a",
+      fillOpacity: 1,
+      weight: 3
+    }).addTo(map).bindTooltip("Cliente");
+
+    const route = await fetchDrivingRoute(riderLocation, destination);
+    if (!route || !container.isConnected) {
+      summary.textContent = "ETA non disponibile";
+      return;
+    }
+
+    const line = L.polyline(route.points, {
+      color: "#e11d48",
+      weight: 5,
+      opacity: 0.82
+    }).addTo(map);
+
+    map.fitBounds(line.getBounds(), {
+      padding: [22, 22],
+      maxZoom: 15
+    });
+
+    summary.textContent = `ETA ${formatEta(route.duration)} - ${formatDistance(route.distance)}`;
+  } catch {
+    summary.textContent = "ETA non disponibile";
+  }
 }
 
 async function updateOrderLocation(code, coords) {

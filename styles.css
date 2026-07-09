@@ -453,6 +453,22 @@ select {
   box-shadow: 0 8px 18px rgba(17, 24, 39, 0.16);
 }
 
+.route-summary {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 500;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.22);
+}
+
 .map-grid {
   position: absolute;
   inset: 0;
