@@ -664,9 +664,10 @@ function bindEvents() {
 
   qs("#shop-login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const error = qs("#shop-login-error");
-    const submit = event.currentTarget.querySelector("button");
+    const submit = form.querySelector("button");
 
     error.hidden = true;
     submit.disabled = true;
@@ -674,7 +675,7 @@ function bindEvents() {
     try {
       await shopLogin(String(data.get("email")).trim(), String(data.get("password")));
       error.hidden = true;
-      event.currentTarget.reset();
+      form.reset();
       renderAll();
       await refreshOrders({ reportErrors: false });
     } catch (loginError) {
