@@ -447,8 +447,10 @@ async function copyCustomerLink(code) {
 }
 
 function trackingLink(code) {
-  const baseUrl = location.href.split("?")[0];
-  return `${baseUrl}?ordine=${encodeURIComponent(code)}`;
+  const configuredUrl = window.RICAMBI_APP?.publicUrl;
+  const baseUrl = configuredUrl || location.href.split("?")[0];
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBase}?ordine=${encodeURIComponent(code)}`;
 }
 
 function normalizePhone(phone) {

@@ -7,3 +7,7 @@ window.RICAMBI_ACCESS = {
   riderPin: "2222",
   shopPin: "9999"
 };
+
+window.RICAMBI_APP = {
+  publicUrl: "https://ciccino56.github.io/Parts-Delivery/"
+};

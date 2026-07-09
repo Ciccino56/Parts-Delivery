@@ -6,6 +6,10 @@ Prototipo mobile-first per tracciare consegne ricambi tra negozio, rider e clien
 
 Apri `index.html` nel browser.
 
+Quando GitHub Pages e attivo, l'app pubblica sara:
+
+`https://ciccino56.github.io/Parts-Delivery/`
+
 Ordini demo:
 
 - `ORD-1024`
