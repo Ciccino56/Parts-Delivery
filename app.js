@@ -662,19 +662,28 @@ function bindEvents() {
     renderAll();
   });
 
-  qs("#shop-login-form").addEventListener("submit", (event) => {
+  qs("#shop-login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const error = qs("#shop-login-error");
+    const submit = event.currentTarget.querySelector("button");
 
-    shopLogin(String(data.get("email")).trim(), String(data.get("password"))).then(() => {
+    error.hidden = true;
+    submit.disabled = true;
+    submit.textContent = "Entro...";
+    try {
+      await shopLogin(String(data.get("email")).trim(), String(data.get("password")));
       error.hidden = true;
       event.currentTarget.reset();
       renderAll();
-      refreshOrders();
-    }).catch(() => {
+      await refreshOrders({ reportErrors: false });
+    } catch (loginError) {
+      error.textContent = loginError.message || "Accesso non riuscito.";
       error.hidden = false;
-    });
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Entra";
+    }
   });
 
   qs("#rider-logout").addEventListener("click", () => {
