@@ -130,6 +130,15 @@ async function supabaseRequest(path, options = {}) {
   return response.json();
 }
 
+async function supabaseRpc(functionName, body, options = {}) {
+  return supabaseRequest(`rpc/${functionName}`, {
+    method: "POST",
+    body,
+    accessToken: options.accessToken,
+    prefer: "return=representation"
+  });
+}
+
 async function supabaseAuth(path, body) {
   const config = window.RICAMBI_SUPABASE;
   const response = await fetch(`${config.url}/auth/v1/${path}`, {
@@ -220,7 +229,23 @@ async function refreshOrders(options = {}) {
   }
 
   try {
-    const rows = await supabaseRequest("orders?select=*&order=created_at.desc");
+    let rows = [];
+
+    if (state.activeView === "customer" && state.customer && state.selectedOrder) {
+      rows = await supabaseRpc("get_customer_order", {
+        p_code: state.selectedOrder.trim().toUpperCase(),
+        p_phone: state.customer.phone
+      });
+    } else if (state.activeView === "rider" && state.access.riderPin) {
+      rows = await supabaseRpc("get_rider_orders", {
+        p_pin: state.access.riderPin
+      });
+    } else if (state.shopSession) {
+      rows = await supabaseRequest("orders?select=*&order=created_at.desc");
+    } else {
+      rows = [];
+    }
+
     state.orders = rows.map(mapSupabaseOrder);
   } catch (error) {
     state.online = false;
@@ -254,6 +279,8 @@ function saveCustomer(customer) {
 function clearCustomer() {
   state.customer = null;
   localStorage.removeItem(CUSTOMER_KEY);
+  state.selectedOrder = "";
+  qs("#order-code").value = "";
 }
 
 function loadAccess() {
@@ -768,10 +795,21 @@ async function updateOrderLocation(code, coords) {
   }
 
   if (isSupabaseReady()) {
-    await supabaseRequest(`orders?code=eq.${encodeURIComponent(code)}`, {
-      method: "PATCH",
-      body: mapOrderPatchForSupabase(patch)
-    });
+    if (state.access.riderPin) {
+      await supabaseRpc("update_rider_order", {
+        p_pin: state.access.riderPin,
+        p_code: code,
+        p_status: patch.status || null,
+        p_lat: patch.lat,
+        p_lng: patch.lng,
+        p_location_at: patch.locationAt
+      });
+    } else {
+      await supabaseRequest(`orders?code=eq.${encodeURIComponent(code)}`, {
+        method: "PATCH",
+        body: mapOrderPatchForSupabase(patch)
+      });
+    }
     await refreshOrders({ silent: true, reportErrors: false });
     return;
   }
@@ -840,10 +878,21 @@ async function updateOrder(code, patch) {
 
   if (isSupabaseReady()) {
     try {
-      await supabaseRequest(`orders?code=eq.${encodeURIComponent(code)}`, {
-        method: "PATCH",
-        body: mapOrderPatchForSupabase(patch)
-      });
+      if (state.activeView === "rider" && state.access.riderPin) {
+        await supabaseRpc("update_rider_order", {
+          p_pin: state.access.riderPin,
+          p_code: code,
+          p_status: patch.status || null,
+          p_lat: patch.lat || null,
+          p_lng: patch.lng || null,
+          p_location_at: patch.locationAt || null
+        });
+      } else {
+        await supabaseRequest(`orders?code=eq.${encodeURIComponent(code)}`, {
+          method: "PATCH",
+          body: mapOrderPatchForSupabase(patch)
+        });
+      }
       await refreshOrders();
       return;
     } catch {
@@ -877,7 +926,13 @@ function trackingLink(code) {
   const configuredUrl = window.RICAMBI_APP?.publicUrl;
   const baseUrl = configuredUrl || location.href.split("?")[0];
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  return `${normalizedBase}?ordine=${encodeURIComponent(code)}`;
+  const order = state.orders.find((item) => item.code.toUpperCase() === String(code).toUpperCase());
+  const params = new URLSearchParams({ ordine: code });
+
+  if (order?.phone) params.set("phone", order.phone);
+  if (order?.client) params.set("name", order.client);
+
+  return `${normalizedBase}?${params.toString()}`;
 }
 
 function openWhatsApp(order) {
@@ -991,20 +1046,45 @@ function bindEvents() {
     renderAll();
   });
 
-  qs("#rider-login-form").addEventListener("submit", (event) => {
+  qs("#rider-login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const pin = new FormData(event.currentTarget).get("pin");
+    const form = event.currentTarget;
+    const pin = String(new FormData(form).get("pin")).trim();
     const error = qs("#rider-login-error");
-
-    if (String(pin).trim() !== accessConfig().riderPin) {
-      error.hidden = false;
-      return;
-    }
+    const submit = form.querySelector("button");
 
     error.hidden = true;
-    event.currentTarget.reset();
-    saveAccess({ rider: true });
-    renderAll();
+    submit.disabled = true;
+    submit.textContent = "Entro...";
+
+    try {
+      let riderName = "";
+
+      if (isSupabaseReady()) {
+        const rows = await supabaseRpc("get_rider_profile", { p_pin: pin });
+        riderName = rows?.[0]?.rider_name || "";
+      } else if (pin === accessConfig().riderPin) {
+        riderName = "Rider";
+      }
+
+      if (!riderName) {
+        error.textContent = "PIN non corretto.";
+        error.hidden = false;
+        return;
+      }
+
+      form.reset();
+      state.riderFilter = "all";
+      saveAccess({ rider: true, riderPin: pin, riderName });
+      renderAll();
+      await refreshOrders({ reportErrors: false });
+    } catch {
+      error.textContent = "Accesso rider non disponibile. Riprova tra poco.";
+      error.hidden = false;
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Entra";
+    }
   });
 
   qs("#shop-login-form").addEventListener("submit", async (event) => {
@@ -1032,7 +1112,8 @@ function bindEvents() {
   });
 
   qs("#rider-logout").addEventListener("click", () => {
-    saveAccess({ rider: false });
+    stopLocationSharing({ render: false });
+    saveAccess({ rider: false, riderPin: "", riderName: "" });
     renderAll();
   });
 

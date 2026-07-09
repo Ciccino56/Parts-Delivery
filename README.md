@@ -19,7 +19,8 @@ Ordini demo:
 ## Cosa fa
 
 - Accesso cliente dimostrativo con nome e telefono.
-- Accesso rider con PIN demo `2222`.
+- Accesso cliente limitato a numero ordine + telefono associato.
+- Accesso rider con PIN separati: Marco `2222`, Luca `3333`, Antonio `4444`, Salvatore `5555`.
 - Accesso negozio con email e password Supabase.
 - Vista cliente con ricerca per numero ordine.
 - Vista rider con avanzamento stato consegna.
@@ -31,6 +32,7 @@ Ordini demo:
 - Dati salvati nel browser per provare il flusso senza server.
 - Schema iniziale Supabase in `supabase-schema.sql`.
 - Migrazione accesso negozio in `supabase-shop-auth.sql`.
+- Migrazione accessi separati in `supabase-access-v3.sql`.
 
 ## Prossimo passo per usarla davvero
 
