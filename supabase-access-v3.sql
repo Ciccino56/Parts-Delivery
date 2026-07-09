@@ -146,6 +146,48 @@ grant execute on function get_rider_profile(text) to anon, authenticated;
 grant execute on function get_rider_orders(text) to anon, authenticated;
 grant execute on function update_rider_order(text, text, text, numeric, numeric, timestamptz) to anon, authenticated;
 
+create or replace function create_shop_order(
+  p_code text,
+  p_customer_name text,
+  p_customer_phone text,
+  p_delivery_address text,
+  p_rider_name text
+)
+returns setof orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_shop_user() then
+    return;
+  end if;
+
+  return query
+  insert into orders (
+    code,
+    customer_name,
+    customer_phone,
+    delivery_address,
+    rider_name,
+    status,
+    updated_at
+  ) values (
+    upper(trim(p_code)),
+    trim(p_customer_name),
+    nullif(trim(p_customer_phone), ''),
+    trim(p_delivery_address),
+    trim(p_rider_name),
+    'created',
+    now()
+  )
+  returning *;
+end;
+$$;
+
+revoke all on function create_shop_order(text, text, text, text, text) from public;
+grant execute on function create_shop_order(text, text, text, text, text) to authenticated;
+
 drop policy if exists orders_demo_select on orders;
 drop policy if exists orders_demo_insert on orders;
 drop policy if exists orders_demo_update on orders;

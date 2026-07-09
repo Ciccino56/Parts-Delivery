@@ -305,7 +305,12 @@ function loadShopSession() {
   if (!raw) return null;
 
   try {
-    return JSON.parse(raw);
+    const session = JSON.parse(raw);
+    if (!session.access_token || session.expires_at <= Date.now()) {
+      localStorage.removeItem(SHOP_SESSION_KEY);
+      return null;
+    }
+    return session;
   } catch {
     localStorage.removeItem(SHOP_SESSION_KEY);
     return null;
@@ -486,10 +491,12 @@ function renderStaffAccess() {
   const shopLogin = qs("#shop-login-panel");
   const shopProtected = qs("#shop-protected");
 
+  const hasShopSession = Boolean(state.shopSession?.access_token && state.shopSession.expires_at > Date.now());
+
   riderLogin.hidden = state.access.rider;
   riderProtected.hidden = !state.access.rider;
-  shopLogin.hidden = Boolean(state.shopSession);
-  shopProtected.hidden = !state.shopSession;
+  shopLogin.hidden = hasShopSession;
+  shopProtected.hidden = !hasShopSession;
 }
 
 function renderCustomerLogin() {
@@ -968,22 +975,32 @@ async function createOrder(form) {
 
   if (isSupabaseReady()) {
     try {
-      await supabaseRequest("orders", {
-        method: "POST",
-        body: {
-          code: order.code,
-          customer_name: order.client,
-          customer_phone: order.phone || state.customer?.phone || null,
-          delivery_address: order.address,
-          rider_name: order.rider,
-          status: order.status
-        }
+      if (!state.shopSession?.access_token) {
+        clearShopSession();
+        renderAll();
+        alert("Accesso negozio scaduto. Entra di nuovo e riprova.");
+        return;
+      }
+
+      const created = await supabaseRpc("create_shop_order", {
+        p_code: order.code,
+        p_customer_name: order.client,
+        p_customer_phone: order.phone || "",
+        p_delivery_address: order.address,
+        p_rider_name: order.rider
+      }, {
+        accessToken: state.shopSession.access_token
       });
+
+      if (!created?.length) {
+        throw new Error("Ordine non autorizzato");
+      }
+
       form.reset();
       await refreshOrders();
       return;
-    } catch {
-      alert("Ordine non creato su Supabase. Controlla chiave e schema.");
+    } catch (error) {
+      alert("Ordine non creato: esci dal negozio, rientra con email/password e riprova.");
       return;
     }
   }
