@@ -4,8 +4,7 @@ window.RICAMBI_SUPABASE = {
 };
 
 window.RICAMBI_ACCESS = {
-  riderPin: "2222",
-  shopPin: "9999"
+  riderPin: "2222"
 };
 
 window.RICAMBI_APP = {

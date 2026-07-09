@@ -20,7 +20,7 @@ Ordini demo:
 
 - Accesso cliente dimostrativo con nome e telefono.
 - Accesso rider con PIN demo `2222`.
-- Accesso negozio con PIN demo `9999`.
+- Accesso negozio con email e password Supabase.
 - Vista cliente con ricerca per numero ordine.
 - Vista rider con avanzamento stato consegna.
 - Vista negozio per creare ordini, copiare il link cliente e aprire WhatsApp con messaggio pronto.
@@ -28,6 +28,7 @@ Ordini demo:
 - Mappa dimostrativa con avanzamento visivo del rider.
 - Dati salvati nel browser per provare il flusso senza server.
 - Schema iniziale Supabase in `supabase-schema.sql`.
+- Migrazione accesso negozio in `supabase-shop-auth.sql`.
 
 ## Prossimo passo per usarla davvero
 

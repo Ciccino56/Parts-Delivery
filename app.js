@@ -1,6 +1,7 @@
 const STORAGE_KEY = "ricambi-delivery-orders-v1";
 const CUSTOMER_KEY = "ricambi-delivery-customer-v1";
 const ACCESS_KEY = "ricambi-delivery-access-v1";
+const SHOP_SESSION_KEY = "ricambi-delivery-shop-session-v1";
 
 const riders = ["Marco", "Luca", "Antonio", "Salvatore"];
 const statuses = [
@@ -44,6 +45,7 @@ const state = {
   riderFilter: "all",
   customer: loadCustomer(),
   access: loadAccess(),
+  shopSession: loadShopSession(),
   orders: loadOrders(),
   loading: false,
   online: isSupabaseReady()
@@ -78,16 +80,17 @@ function isSupabaseReady() {
 }
 
 function accessConfig() {
-  return window.RICAMBI_ACCESS || { riderPin: "2222", shopPin: "9999" };
+  return window.RICAMBI_ACCESS || { riderPin: "2222" };
 }
 
 async function supabaseRequest(path, options = {}) {
   const config = window.RICAMBI_SUPABASE;
+  const accessToken = options.accessToken || state.shopSession?.access_token || config.anonKey;
   const response = await fetch(`${config.url}/rest/v1/${path}`, {
     method: options.method || "GET",
     headers: {
       apikey: config.anonKey,
-      Authorization: `Bearer ${config.anonKey}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
       Prefer: options.prefer || "return=representation"
     },
@@ -100,6 +103,38 @@ async function supabaseRequest(path, options = {}) {
 
   if (response.status === 204) return null;
   return response.json();
+}
+
+async function supabaseAuth(path, body) {
+  const config = window.RICAMBI_SUPABASE;
+  const response = await fetch(`${config.url}/auth/v1/${path}`, {
+    method: "POST",
+    headers: {
+      apikey: config.anonKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase auth error ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function shopLogin(email, password) {
+  const session = await supabaseAuth("token?grant_type=password", {
+    email,
+    password
+  });
+
+  saveShopSession({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: Date.now() + (session.expires_in || 3600) * 1000,
+    email: session.user?.email || email
+  });
 }
 
 function mapSupabaseOrder(row) {
@@ -115,6 +150,21 @@ function mapSupabaseOrder(row) {
   };
 }
 
+function normalizePhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("39")) return digits;
+  if (digits.length >= 9) return `39${digits}`;
+  return digits;
+}
+
+function canCustomerViewOrder(order) {
+  if (!state.customer) return false;
+  const customerPhone = normalizePhone(state.customer.phone);
+  const orderPhone = normalizePhone(order.phone);
+  return Boolean(customerPhone && orderPhone && customerPhone === orderPhone);
+}
+
 function mapOrderPatchForSupabase(patch) {
   const mapped = { updated_at: new Date().toISOString() };
   if (patch.status) mapped.status = patch.status;
@@ -122,7 +172,9 @@ function mapOrderPatchForSupabase(patch) {
   return mapped;
 }
 
-async function refreshOrders() {
+async function refreshOrders(options = {}) {
+  const { silent = false, reportErrors = true } = options;
+
   if (!isSupabaseReady()) {
     state.online = false;
     state.orders = loadOrders();
@@ -131,8 +183,10 @@ async function refreshOrders() {
   }
 
   state.online = true;
-  state.loading = true;
-  renderAll();
+  if (!silent) {
+    state.loading = true;
+    renderAll();
+  }
 
   try {
     const rows = await supabaseRequest("orders?select=*&order=created_at.desc");
@@ -140,7 +194,9 @@ async function refreshOrders() {
   } catch (error) {
     state.online = false;
     state.orders = loadOrders();
-    alert("Supabase non risponde ancora. Uso i dati demo sul dispositivo.");
+    if (reportErrors) {
+      alert("Supabase non risponde ancora. Uso i dati demo sul dispositivo.");
+    }
   } finally {
     state.loading = false;
     renderAll();
@@ -184,6 +240,30 @@ function loadAccess() {
 function saveAccess(patch) {
   state.access = { ...state.access, ...patch };
   localStorage.setItem(ACCESS_KEY, JSON.stringify(state.access));
+}
+
+function loadShopSession() {
+  const raw = localStorage.getItem(SHOP_SESSION_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(SHOP_SESSION_KEY);
+    return null;
+  }
+}
+
+function saveShopSession(session) {
+  state.shopSession = session;
+  localStorage.setItem(SHOP_SESSION_KEY, JSON.stringify(session));
+  saveAccess({ shop: true });
+}
+
+function clearShopSession() {
+  state.shopSession = null;
+  localStorage.removeItem(SHOP_SESSION_KEY);
+  saveAccess({ shop: false });
 }
 
 function statusIndex(key) {
@@ -239,8 +319,8 @@ function renderStaffAccess() {
 
   riderLogin.hidden = state.access.rider;
   riderProtected.hidden = !state.access.rider;
-  shopLogin.hidden = state.access.shop;
-  shopProtected.hidden = !state.access.shop;
+  shopLogin.hidden = Boolean(state.shopSession);
+  shopProtected.hidden = !state.shopSession;
 }
 
 function renderCustomerLogin() {
@@ -288,6 +368,11 @@ function renderCustomer() {
     return;
   }
 
+  if (!canCustomerViewOrder(order)) {
+    result.innerHTML = '<div class="empty-state">Questo ordine non risulta associato al telefono inserito.</div>';
+    return;
+  }
+
   result.append(renderOrderCard(order, "customer"));
 }
 
@@ -314,7 +399,7 @@ function renderRider() {
 
 function renderShop() {
   const list = qs("#shop-list");
-  if (!state.access.shop) {
+  if (!state.shopSession) {
     list.innerHTML = "";
     return;
   }
@@ -358,7 +443,7 @@ function renderOrderCard(order, mode) {
   if (mode === "rider") renderRiderActions(actions, order);
   if (mode === "shop") renderShopActions(actions, order);
   if (mode === "customer") {
-    actions.append(createButton("Aggiorna", "secondary", () => renderCustomer()));
+    actions.append(createButton("Aggiorna", "secondary", () => refreshOrders()));
     actions.append(createButton("Copia link", "secondary", () => copyCustomerLink(order.code)));
   }
 
@@ -433,11 +518,11 @@ async function updateOrder(code, patch) {
 }
 
 async function copyCustomerLink(code) {
-  const url = `${location.origin}${location.pathname}?ordine=${encodeURIComponent(code)}`;
+  const url = trackingLink(code);
   state.selectedOrder = code;
   qs("#order-code").value = code;
   setActiveView("customer");
-  renderCustomer();
+  await refreshOrders({ silent: true, reportErrors: false });
 
   try {
     await navigator.clipboard.writeText(url);
@@ -451,14 +536,6 @@ function trackingLink(code) {
   const baseUrl = configuredUrl || location.href.split("?")[0];
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return `${normalizedBase}?ordine=${encodeURIComponent(code)}`;
-}
-
-function normalizePhone(phone) {
-  const digits = String(phone || "").replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("39")) return digits;
-  if (digits.length >= 9) return `39${digits}`;
-  return digits;
 }
 
 function openWhatsApp(order) {
@@ -550,7 +627,7 @@ function bindEvents() {
     event.preventDefault();
     if (!state.customer) return;
     state.selectedOrder = qs("#order-code").value;
-    renderCustomer();
+    refreshOrders();
   });
 
   qs("#customer-login-form").addEventListener("submit", (event) => {
@@ -587,18 +664,17 @@ function bindEvents() {
 
   qs("#shop-login-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    const pin = new FormData(event.currentTarget).get("pin");
+    const data = new FormData(event.currentTarget);
     const error = qs("#shop-login-error");
 
-    if (String(pin).trim() !== accessConfig().shopPin) {
+    shopLogin(String(data.get("email")).trim(), String(data.get("password"))).then(() => {
+      error.hidden = true;
+      event.currentTarget.reset();
+      renderAll();
+      refreshOrders();
+    }).catch(() => {
       error.hidden = false;
-      return;
-    }
-
-    error.hidden = true;
-    event.currentTarget.reset();
-    saveAccess({ shop: true });
-    renderAll();
+    });
   });
 
   qs("#rider-logout").addEventListener("click", () => {
@@ -607,7 +683,7 @@ function bindEvents() {
   });
 
   qs("#shop-logout").addEventListener("click", () => {
-    saveAccess({ shop: false });
+    clearShopSession();
     renderAll();
   });
 
@@ -640,3 +716,15 @@ window.addEventListener("storage", (event) => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
+
+setInterval(() => {
+  if (state.customer && state.selectedOrder && !state.loading) {
+    refreshOrders({ silent: true, reportErrors: false });
+  }
+}, 8000);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.customer && state.selectedOrder) {
+    refreshOrders({ silent: true, reportErrors: false });
+  }
+});
