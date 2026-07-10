@@ -734,23 +734,34 @@ async function planShopRoutes() {
   const button = qs("#plan-routes");
   const status = qs("#planner-status");
   const availableRiders = selectedPlannerRiders();
-  const orders = activePlannerOrders();
 
   if (!availableRiders.length) {
     alert("Seleziona almeno un rider disponibile.");
     return;
   }
 
-  if (!orders.length) {
-    alert("Non ci sono ordini da pianificare.");
+  if (isSupabaseReady() && !state.shopSession?.access_token) {
+    alert("Entra come negozio, poi riprova a pianificare.");
     return;
   }
 
   button.disabled = true;
-  button.textContent = "Calcolo...";
-  status.textContent = "Sto leggendo indirizzi e zone...";
+  button.textContent = "Carico...";
+  status.textContent = "Aggiorno gli ordini prima di pianificare...";
 
   try {
+    await refreshOrders({ silent: true, reportErrors: false });
+    const orders = activePlannerOrders();
+
+    if (!orders.length) {
+      alert("Non ci sono ordini aperti da pianificare. Controlla che non siano gia consegnati o annullati.");
+      status.textContent = "Nessun ordine aperto da pianificare.";
+      return;
+    }
+
+    button.textContent = "Calcolo...";
+    status.textContent = "Sto leggendo indirizzi e zone...";
+
     const deliveryStops = orders.map((order) => ({
       id: order.code,
       type: "delivery",
