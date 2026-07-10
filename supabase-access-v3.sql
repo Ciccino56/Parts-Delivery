@@ -1,10 +1,13 @@
 create table if not exists staff_users (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
+  user_id uuid,
   role text not null check (role in ('shop', 'rider')),
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+alter table staff_users add column if not exists user_id uuid;
 
 create table if not exists rider_access (
   id uuid primary key default gen_random_uuid(),
@@ -17,6 +20,12 @@ create table if not exists rider_access (
 insert into staff_users (email, role)
 values ('info@centroricambiautosrl.it', 'shop')
 on conflict (email) do update set role = excluded.role, active = true;
+
+update staff_users
+set user_id = auth_users.id
+from auth.users as auth_users
+where lower(auth_users.email) = lower(staff_users.email)
+  and staff_users.user_id is null;
 
 insert into rider_access (rider_name, pin) values
   ('Marco', '2222'),
@@ -45,9 +54,12 @@ as $$
   select exists (
     select 1
     from staff_users
-    where lower(email) = lower(auth.jwt() ->> 'email')
-      and role = 'shop'
+    where role = 'shop'
       and active = true
+      and (
+        (user_id is not null and user_id = (select auth.uid()))
+        or lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      )
   );
 $$;
 

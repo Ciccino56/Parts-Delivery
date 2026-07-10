@@ -125,7 +125,17 @@ async function supabaseRequest(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase error ${response.status}`);
+    let details = "";
+    try {
+      const payload = await response.json();
+      details = payload.message || payload.details || payload.hint || "";
+    } catch {
+      details = await response.text().catch(() => "");
+    }
+
+    const error = new Error(details || `Supabase error ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   if (response.status === 204) return null;
@@ -1114,11 +1124,20 @@ async function createOrder(form) {
         throw new Error("Ordine non autorizzato");
       }
 
+      state.shopSearch = "";
+      state.shopFilter = "active";
+      qs("#shop-search").value = "";
+      qs("#shop-status-filter").value = "active";
       form.reset();
       await refreshOrders();
+      alert(`Ordine ${order.code} creato.`);
       return;
     } catch (error) {
-      alert("Ordine non creato: esci dal negozio, rientra con email/password e riprova.");
+      if (error.status === 409 || String(error.message).toLowerCase().includes("duplicate")) {
+        alert(`Ordine ${order.code} gia esistente. Usa un numero ordine nuovo oppure modifica quello esistente.`);
+      } else {
+        alert(`Ordine non creato: ${error.message || "riprova tra poco."}`);
+      }
       return;
     }
   }
@@ -1126,8 +1145,11 @@ async function createOrder(form) {
   orders.unshift(order);
 
   saveOrders(orders);
+  state.shopSearch = "";
+  state.shopFilter = "active";
   form.reset();
   renderAll();
+  alert(`Ordine ${order.code} creato.`);
 }
 
 function bootFromUrl() {
