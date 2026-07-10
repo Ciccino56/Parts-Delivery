@@ -59,6 +59,7 @@ const state = {
   shopSession: loadShopSession(),
   routeCache: loadRouteCache(),
   orders: loadOrders(),
+  plan: null,
   loading: false,
   online: isSupabaseReady(),
   locationSharing: null
@@ -516,6 +517,14 @@ function paymentLabel(value) {
   return "Pagamento n/d";
 }
 
+function plannedStep(order) {
+  const match = String(order.notes || "").match(/Giro:\s*([^,|]+),\s*tappa\s*(\d+)/i);
+  return {
+    rider: match?.[1]?.trim() || "",
+    step: match ? Number(match[2]) : 999
+  };
+}
+
 function routeCacheKey(prefix, parts) {
   return `${prefix}:${parts.map((part) => String(part).trim().toLowerCase()).join("|")}`;
 }
@@ -618,6 +627,244 @@ async function fetchDrivingRoute(from, to) {
   return route;
 }
 
+function activePlannerOrders() {
+  return state.orders
+    .filter((order) => order.status !== "delivered")
+    .sort((a, b) => {
+      const urgentScore = Number(b.priority === "urgent") - Number(a.priority === "urgent");
+      return urgentScore || statusIndex(a.status) - statusIndex(b.status) || b.updatedAt - a.updatedAt;
+    });
+}
+
+function selectedPlannerRiders() {
+  return qsa("#planner-riders input:checked").map((input) => input.value);
+}
+
+function plannerDepotStops() {
+  return qs("#planner-depots").value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((address, index) => ({
+      id: `deposit-${index + 1}`,
+      type: "deposit",
+      label: `Deposito ${index + 1}`,
+      address,
+      priority: "normal"
+    }));
+}
+
+async function enrichPlannerStop(stop) {
+  const location = await geocodeAddress(stop.address).catch(() => null);
+  return { ...stop, location };
+}
+
+async function enrichPlannerStops(stops) {
+  const enriched = [];
+  for (const stop of stops) {
+    enriched.push(await enrichPlannerStop(stop));
+  }
+  return enriched;
+}
+
+function routeDistance(from, to) {
+  if (!from || !to) return 8000;
+  return distanceInMeters(from, to) * 1.35;
+}
+
+function nearestPlannerOrder(stops, startLocation) {
+  const urgentStops = stops.filter((stop) => stop.priority === "urgent");
+  const pool = urgentStops.length ? urgentStops : stops;
+
+  return pool.reduce((best, stop) => {
+    const score = routeDistance(startLocation, stop.location);
+    return !best || score < best.score ? { stop, score } : best;
+  }, null)?.stop;
+}
+
+function orderPlannerStops(stops) {
+  const remaining = [...stops];
+  const ordered = [];
+  let cursor = shopLocation;
+
+  while (remaining.length) {
+    const next = nearestPlannerOrder(remaining, cursor) || remaining[0];
+    ordered.push(next);
+    remaining.splice(remaining.indexOf(next), 1);
+    cursor = next.location || cursor;
+  }
+
+  return ordered;
+}
+
+function buildPlannerRoutes(stops, availableRiders) {
+  const routes = availableRiders.map((rider) => ({
+    rider,
+    stops: [],
+    distance: 0,
+    cursor: shopLocation
+  }));
+
+  const orderedStops = [
+    ...orderPlannerStops(stops.filter((stop) => stop.priority === "urgent")),
+    ...orderPlannerStops(stops.filter((stop) => stop.priority !== "urgent"))
+  ];
+
+  orderedStops.forEach((stop) => {
+    const bestRoute = routes.reduce((best, route) => {
+      const leg = routeDistance(route.cursor, stop.location);
+      const loadPenalty = route.stops.length * 1800;
+      const score = route.distance + leg + loadPenalty;
+      return !best || score < best.score ? { route, leg, score } : best;
+    }, null);
+
+    bestRoute.route.stops.push(stop);
+    bestRoute.route.distance += bestRoute.leg;
+    bestRoute.route.cursor = stop.location || bestRoute.route.cursor;
+  });
+
+  return routes.map((route) => ({
+    ...route,
+    stops: orderPlannerStops(route.stops),
+    etaSeconds: route.distance / 7.8
+  }));
+}
+
+async function planShopRoutes() {
+  const button = qs("#plan-routes");
+  const status = qs("#planner-status");
+  const availableRiders = selectedPlannerRiders();
+  const orders = activePlannerOrders();
+
+  if (!availableRiders.length) {
+    alert("Seleziona almeno un rider disponibile.");
+    return;
+  }
+
+  if (!orders.length) {
+    alert("Non ci sono ordini da pianificare.");
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Calcolo...";
+  status.textContent = "Sto leggendo indirizzi e zone...";
+
+  try {
+    const deliveryStops = orders.map((order) => ({
+      id: order.code,
+      type: "delivery",
+      order,
+      label: order.client,
+      address: order.address,
+      priority: order.priority || "normal"
+    }));
+    const stops = await enrichPlannerStops([...deliveryStops, ...plannerDepotStops()]);
+    const routes = buildPlannerRoutes(stops, availableRiders);
+
+    state.plan = {
+      createdAt: Date.now(),
+      routes
+    };
+
+    status.textContent = "Piano pronto. Controllalo e applicalo se ti va bene.";
+    renderPlannerResult();
+  } catch {
+    alert("Non sono riuscito a calcolare il giro. Controlla gli indirizzi e riprova.");
+    status.textContent = "Pianificazione non riuscita.";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Pianifica";
+  }
+}
+
+function plannerStopTitle(stop) {
+  if (stop.type === "deposit") return stop.label;
+  return `${stop.order.code} - ${stop.order.client}`;
+}
+
+function renderPlannerResult() {
+  const container = qs("#planner-result");
+  const applyButton = qs("#apply-plan");
+  if (!container || !applyButton) return;
+
+  container.innerHTML = "";
+  applyButton.hidden = !state.plan;
+
+  if (!state.plan) return;
+
+  state.plan.routes.forEach((route) => {
+    const card = document.createElement("article");
+    card.className = "route-plan";
+
+    const deliveryCount = route.stops.filter((stop) => stop.type === "delivery").length;
+    const summary = `${deliveryCount} consegne - ${formatDistance(route.distance)} - ${formatEta(route.etaSeconds)}`;
+    card.innerHTML = `
+      <div class="route-plan-top">
+        <h4>${route.rider}</h4>
+        <span class="pill">${summary}</span>
+      </div>
+    `;
+
+    const list = document.createElement("ol");
+    if (!route.stops.length) {
+      const item = document.createElement("li");
+      item.textContent = "Nessuna tappa assegnata";
+      list.append(item);
+    }
+
+    route.stops.forEach((stop) => {
+      const item = document.createElement("li");
+      const tag = stop.priority === "urgent" ? "Urgente" : stop.type === "deposit" ? "Deposito" : "Consegna";
+      const title = document.createTextNode(plannerStopTitle(stop));
+      const detail = document.createElement("small");
+      detail.textContent = `${tag} - ${stop.address}`;
+      item.append(title, detail);
+      list.append(item);
+    });
+
+    card.append(list);
+    container.append(card);
+  });
+}
+
+function appendPlanNote(existing, rider, index) {
+  const clean = String(existing || "").replace(/\s*Giro:\s*[^|]+(\|\s*)?/i, "").trim();
+  const note = `Giro: ${rider}, tappa ${index}`;
+  return clean ? `${note} | ${clean}` : note;
+}
+
+async function applyShopPlan() {
+  if (!state.plan) return;
+
+  const confirmed = window.confirm("Applicare rider e numero tappa agli ordini del piano?");
+  if (!confirmed) return;
+
+  const button = qs("#apply-plan");
+  button.disabled = true;
+  button.textContent = "Applico...";
+
+  try {
+    for (const route of state.plan.routes) {
+      const deliveries = route.stops.filter((stop) => stop.type === "delivery");
+      for (let index = 0; index < deliveries.length; index += 1) {
+        const order = deliveries[index].order;
+        await updateShopOrder(order, {
+          rider: route.rider,
+          notes: appendPlanNote(order.notes, route.rider, index + 1)
+        });
+      }
+    }
+
+    state.plan = null;
+    renderPlannerResult();
+    alert("Piano applicato agli ordini.");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Applica piano";
+  }
+}
+
 function setActiveView(view) {
   state.activeView = view;
   qsa(".tab").forEach((tab) => tab.classList.toggle("is-active", tab.dataset.view === view));
@@ -652,14 +899,30 @@ function renderCustomerDirectoryOptions() {
   });
 }
 
+function renderPlannerRiders() {
+  const container = qs("#planner-riders");
+  if (!container) return;
+  if (container.children.length) return;
+
+  container.innerHTML = "";
+  riders.forEach((rider) => {
+    const label = document.createElement("label");
+    label.className = "check-pill";
+    label.innerHTML = `<input type="checkbox" value="${rider}" checked> <span>${rider}</span>`;
+    container.append(label);
+  });
+}
+
 function renderAll() {
   renderRiderOptions();
   renderCustomerDirectoryOptions();
+  renderPlannerRiders();
   renderCustomerLogin();
   renderStaffAccess();
   renderCustomer();
   renderRider();
   renderShop();
+  renderPlannerResult();
 }
 
 function renderStaffAccess() {
@@ -736,9 +999,19 @@ function renderRider() {
     return;
   }
 
-  const orders = state.orders.filter((order) => (
-    state.riderFilter === "all" ? order.status !== "delivered" : order.rider === state.riderFilter
-  ));
+  const orders = state.orders
+    .filter((order) => (
+      order.status !== "delivered"
+        && (state.riderFilter === "all" || order.rider === state.riderFilter)
+    ))
+    .sort((a, b) => {
+      const planA = plannedStep(a);
+      const planB = plannedStep(b);
+      return a.rider.localeCompare(b.rider)
+        || planA.step - planB.step
+        || Number(b.priority === "urgent") - Number(a.priority === "urgent")
+        || b.updatedAt - a.updatedAt;
+    });
 
   list.innerHTML = "";
 
@@ -1507,6 +1780,9 @@ function bindEvents() {
 
   qs("#new-client").addEventListener("change", fillKnownCustomer);
   qs("#new-client").addEventListener("input", fillKnownCustomer);
+
+  qs("#plan-routes").addEventListener("click", planShopRoutes);
+  qs("#apply-plan").addEventListener("click", applyShopPlan);
 
   qs("#new-order-form").addEventListener("submit", (event) => {
     event.preventDefault();
