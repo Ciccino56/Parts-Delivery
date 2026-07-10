@@ -286,6 +286,14 @@ function mapSupabaseOrder(row) {
   };
 }
 
+function rememberOrder(order) {
+  const nextOrders = [
+    order,
+    ...state.orders.filter((item) => item.code.toUpperCase() !== order.code.toUpperCase())
+  ];
+  saveOrders(nextOrders);
+}
+
 function mapSupabaseCustomer(row) {
   return {
     id: row.id || "",
@@ -415,7 +423,9 @@ async function refreshOrders(options = {}) {
     await refreshCustomerDirectory();
   } catch (error) {
     state.online = false;
-    state.orders = loadOrders();
+    if (!silent || !state.orders.length) {
+      state.orders = loadOrders();
+    }
     syncCustomersFromOrders();
     if (reportErrors) {
       alert("Supabase non risponde ancora. Uso i dati demo sul dispositivo.");
@@ -872,12 +882,21 @@ function plannerStopTitle(stop) {
 function renderPlannerResult() {
   const container = qs("#planner-result");
   const applyButton = qs("#apply-plan");
+  const status = qs("#planner-status");
   if (!container || !applyButton) return;
 
   container.innerHTML = "";
   applyButton.hidden = !state.plan;
 
-  if (!state.plan) return;
+  if (!state.plan) {
+    if (status && !state.loading) {
+      const count = activePlannerOrders().length;
+      status.textContent = count
+        ? `${count} ordini aperti pronti da pianificare.`
+        : "Nessun ordine aperto da pianificare.";
+    }
+    return;
+  }
 
   state.plan.routes.forEach((route) => {
     const card = document.createElement("article");
@@ -1737,9 +1756,10 @@ async function createOrder(form, options = {}) {
       qs("#shop-search").value = "";
       qs("#shop-status-filter").value = "active";
       form.reset();
+      rememberOrder(mapSupabaseOrder(created[0]));
       saveCustomerDirectory([customerFromOrder(order), ...state.customers]);
       await saveShopCustomerOnline(order);
-      await refreshOrders();
+      await refreshOrders({ silent: true, reportErrors: false });
       if (!options.silentSuccess) alert(`Ordine ${order.code} creato.`);
       return true;
     } catch (error) {
