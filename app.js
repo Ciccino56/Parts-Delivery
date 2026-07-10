@@ -50,6 +50,8 @@ const state = {
   activeView: "customer",
   selectedOrder: "",
   riderFilter: "all",
+  shopFilter: "active",
+  shopSearch: "",
   customer: loadCustomer(),
   access: loadAccess(),
   shopSession: loadShopSession(),
@@ -580,8 +582,29 @@ function renderShop() {
     return;
   }
 
-  const orders = state.orders;
+  const query = state.shopSearch.trim().toLowerCase();
+  const orders = state.orders.filter((order) => {
+    const matchesFilter = state.shopFilter === "all"
+      || (state.shopFilter === "active" && order.status !== "delivered")
+      || order.status === state.shopFilter;
+    const haystack = [
+      order.code,
+      order.client,
+      order.phone,
+      order.address,
+      order.rider,
+      statusMeta(order.status).label
+    ].join(" ").toLowerCase();
+
+    return matchesFilter && (!query || haystack.includes(query));
+  });
+
   list.innerHTML = "";
+
+  if (!orders.length) {
+    list.innerHTML = '<div class="empty-state">Nessun ordine trovato.</div>';
+    return;
+  }
 
   orders.forEach((order) => list.append(renderOrderCard(order, "shop")));
 }
@@ -672,7 +695,11 @@ function renderRiderActions(container, order) {
 function renderShopActions(container, order) {
   container.append(createButton("Link cliente", "secondary", () => copyCustomerLink(order.code)));
   container.append(createButton("Invia WhatsApp", "secondary", () => openWhatsApp(order)));
-  container.append(createButton("Segna consegnato", "", () => updateOrder(order.code, { status: "delivered" })));
+  container.append(createButton("Modifica", "secondary", () => editShopOrder(order)));
+  if (order.status !== "delivered") {
+    container.append(createButton("Consegnato", "", () => updateOrder(order.code, { status: "delivered" })));
+  }
+  container.append(createButton("Annulla", "danger", () => cancelShopOrder(order)));
 }
 
 function positionRider(pin, progress) {
@@ -953,6 +980,97 @@ function openWhatsApp(order) {
   window.open(whatsappUrl, "_blank", "noopener");
 }
 
+async function updateShopOrder(order, patch) {
+  if (isSupabaseReady()) {
+    if (!state.shopSession?.access_token) {
+      clearShopSession();
+      renderAll();
+      alert("Accesso negozio scaduto. Entra di nuovo e riprova.");
+      return;
+    }
+
+    try {
+      const updated = await supabaseRpc("update_shop_order", {
+        p_code: order.code,
+        p_customer_name: patch.client || null,
+        p_customer_phone: patch.phone || null,
+        p_delivery_address: patch.address || null,
+        p_rider_name: patch.rider || null
+      }, {
+        accessToken: state.shopSession.access_token
+      });
+
+      if (!updated?.length) throw new Error("Ordine non aggiornato");
+
+      await refreshOrders();
+      return;
+    } catch {
+      alert("Modifica non salvata. Esci dal negozio, rientra e riprova.");
+      return;
+    }
+  }
+
+  const orders = state.orders.map((item) => (
+    item.code === order.code ? { ...item, ...patch, updatedAt: Date.now() } : item
+  ));
+  saveOrders(orders);
+  renderAll();
+}
+
+async function editShopOrder(order) {
+  const client = window.prompt("Cliente", order.client);
+  if (client === null) return;
+
+  const phone = window.prompt("Telefono cliente", order.phone || "");
+  if (phone === null) return;
+
+  const address = window.prompt("Indirizzo", order.address);
+  if (address === null) return;
+
+  const rider = window.prompt(`Rider (${riders.join(", ")})`, order.rider);
+  if (rider === null) return;
+
+  await updateShopOrder(order, {
+    client: client.trim(),
+    phone: phone.trim(),
+    address: address.trim(),
+    rider: rider.trim()
+  });
+}
+
+async function cancelShopOrder(order) {
+  const confirmed = window.confirm(`Annullare l'ordine ${order.code}?`);
+  if (!confirmed) return;
+
+  if (isSupabaseReady()) {
+    if (!state.shopSession?.access_token) {
+      clearShopSession();
+      renderAll();
+      alert("Accesso negozio scaduto. Entra di nuovo e riprova.");
+      return;
+    }
+
+    try {
+      const deleted = await supabaseRpc("delete_shop_order", {
+        p_code: order.code
+      }, {
+        accessToken: state.shopSession.access_token
+      });
+
+      if (!deleted) throw new Error("Ordine non annullato");
+
+      await refreshOrders();
+      return;
+    } catch {
+      alert("Ordine non annullato. Esci dal negozio, rientra e riprova.");
+      return;
+    }
+  }
+
+  saveOrders(state.orders.filter((item) => item.code !== order.code));
+  renderAll();
+}
+
 async function createOrder(form) {
   const data = new FormData(form);
   const orders = state.orders;
@@ -1142,6 +1260,16 @@ function bindEvents() {
   qs("#rider-filter").addEventListener("change", (event) => {
     state.riderFilter = event.target.value;
     renderRider();
+  });
+
+  qs("#shop-search").addEventListener("input", (event) => {
+    state.shopSearch = event.target.value;
+    renderShop();
+  });
+
+  qs("#shop-status-filter").addEventListener("change", (event) => {
+    state.shopFilter = event.target.value;
+    renderShop();
   });
 
   qs("#new-order-form").addEventListener("submit", (event) => {

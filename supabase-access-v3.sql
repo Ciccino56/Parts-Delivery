@@ -110,6 +110,7 @@ set search_path = public
 as $$
 declare
   allowed_rider text;
+  next_status delivery_status;
 begin
   select rider_name into allowed_rider
   from rider_access
@@ -121,18 +122,22 @@ begin
     return;
   end if;
 
+  if p_status is not null then
+    next_status := p_status::delivery_status;
+  end if;
+
   return query
   update orders
   set
-    status = coalesce(p_status, status),
-    last_lat = coalesce(p_lat, last_lat),
-    last_lng = coalesce(p_lng, last_lng),
-    last_location_at = coalesce(p_location_at, last_location_at),
-    delivered_at = case when p_status = 'delivered' then now() else delivered_at end,
+    status = coalesce(next_status, orders.status),
+    last_lat = coalesce(p_lat, orders.last_lat),
+    last_lng = coalesce(p_lng, orders.last_lng),
+    last_location_at = coalesce(p_location_at, orders.last_location_at),
+    delivered_at = case when next_status = 'delivered'::delivery_status then now() else orders.delivered_at end,
     updated_at = now()
-  where upper(code) = upper(trim(p_code))
-    and lower(rider_name) = lower(allowed_rider)
-  returning *;
+  where upper(orders.code) = upper(trim(p_code))
+    and lower(orders.rider_name) = lower(allowed_rider)
+  returning orders.*;
 end;
 $$;
 
@@ -187,6 +192,66 @@ $$;
 
 revoke all on function create_shop_order(text, text, text, text, text) from public;
 grant execute on function create_shop_order(text, text, text, text, text) to authenticated;
+
+create or replace function update_shop_order(
+  p_code text,
+  p_customer_name text default null,
+  p_customer_phone text default null,
+  p_delivery_address text default null,
+  p_rider_name text default null
+)
+returns setof orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_shop_user() then
+    return;
+  end if;
+
+  return query
+  update orders
+  set
+    customer_name = coalesce(nullif(trim(p_customer_name), ''), orders.customer_name),
+    customer_phone = coalesce(nullif(trim(p_customer_phone), ''), orders.customer_phone),
+    delivery_address = coalesce(nullif(trim(p_delivery_address), ''), orders.delivery_address),
+    rider_name = coalesce(nullif(trim(p_rider_name), ''), orders.rider_name),
+    updated_at = now()
+  where upper(orders.code) = upper(trim(p_code))
+  returning orders.*;
+end;
+$$;
+
+create or replace function delete_shop_order(p_code text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  deleted_count integer;
+begin
+  if not is_shop_user() then
+    return false;
+  end if;
+
+  delete from order_events where order_id in (
+    select id from orders where upper(code) = upper(trim(p_code))
+  );
+
+  delete from orders
+  where upper(code) = upper(trim(p_code));
+
+  get diagnostics deleted_count = row_count;
+  return deleted_count > 0;
+end;
+$$;
+
+revoke all on function update_shop_order(text, text, text, text, text) from public;
+revoke all on function delete_shop_order(text) from public;
+grant execute on function update_shop_order(text, text, text, text, text) to authenticated;
+grant execute on function delete_shop_order(text) to authenticated;
 
 drop policy if exists orders_demo_select on orders;
 drop policy if exists orders_demo_insert on orders;

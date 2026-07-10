@@ -246,6 +246,14 @@ input:disabled {
   gap: 12px;
 }
 
+.shop-tools {
+  display: grid;
+  grid-template-columns: 1fr minmax(150px, 220px);
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
 label {
   display: block;
   margin-bottom: 6px;
@@ -550,6 +558,12 @@ select {
   color: var(--ink);
 }
 
+.action-button.danger {
+  border: 1px solid rgba(190, 18, 60, 0.22);
+  background: #fff1f2;
+  color: #9f1239;
+}
+
 .empty-state {
   padding: 18px;
   border: 1px dashed #bcc8d8;
@@ -596,7 +610,8 @@ select {
   }
 
   .inline-field,
-  .actions {
+  .actions,
+  .shop-tools {
     grid-template-columns: 1fr;
   }
 

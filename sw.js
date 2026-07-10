@@ -1,4 +1,4 @@
-const CACHE_NAME = "ricambi-delivery-v20";
+const CACHE_NAME = "ricambi-delivery-v22";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -28,7 +28,8 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
   const isAppAsset = url.origin === self.location.origin && url.pathname.includes("/Parts-Delivery/");
-  const isFreshAsset = isAppAsset && /\.(html|css|js|json)$/.test(url.pathname);
+  const isNavigation = event.request.mode === "navigate" || url.pathname.endsWith("/");
+  const isFreshAsset = isAppAsset && (isNavigation || /\.(html|css|js|json)$/.test(url.pathname));
 
   if (isFreshAsset) {
     event.respondWith(

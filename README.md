@@ -25,6 +25,7 @@ Ordini demo:
 - Vista cliente con ricerca per numero ordine.
 - Vista rider con avanzamento stato consegna.
 - Vista negozio per creare ordini, copiare il link cliente e aprire WhatsApp con messaggio pronto.
+- Banco negozio con ricerca, filtri per stato, modifica ordine e annullamento.
 - Stati consegna: da ritirare, ritirato, in consegna, sta arrivando, consegnato.
 - Mappa reale OpenStreetMap con posizione GPS del rider quando attiva.
 - Pulsante rider `Condividi GPS` per inviare la posizione in tempo reale al cliente.

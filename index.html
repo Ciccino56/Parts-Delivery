@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#111827">
     <title>Ricambi Delivery</title>
-    <link rel="manifest" href="manifest.json?v=20">
+    <link rel="manifest" href="manifest.json?v=22">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=20">
+    <link rel="stylesheet" href="styles.css?v=22">
   </head>
   <body>
     <main class="app-shell">
@@ -161,6 +161,25 @@
             <button type="submit">Crea consegna</button>
           </form>
 
+          <div class="panel shop-tools">
+            <div>
+              <label for="shop-search">Cerca</label>
+              <input id="shop-search" type="search" placeholder="Ordine, cliente, telefono">
+            </div>
+            <div>
+              <label for="shop-status-filter">Stato</label>
+              <select id="shop-status-filter">
+                <option value="active">Da gestire</option>
+                <option value="created">Da ritirare</option>
+                <option value="picked">Ritirati</option>
+                <option value="moving">In consegna</option>
+                <option value="near">Sta arrivando</option>
+                <option value="delivered">Consegnati</option>
+                <option value="all">Tutti</option>
+              </select>
+            </div>
+          </div>
+
           <div id="shop-list" class="stack"></div>
         </div>
       </section>
@@ -191,8 +210,8 @@
       </article>
     </template>
 
-    <script src="config.js?v=20"></script>
+    <script src="config.js?v=22"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20"></script>
+    <script src="app.js?v=22"></script>
   </body>
 </html>
