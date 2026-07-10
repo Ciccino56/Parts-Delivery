@@ -629,7 +629,7 @@ async function fetchDrivingRoute(from, to) {
 
 function activePlannerOrders() {
   return state.orders
-    .filter((order) => order.status !== "delivered")
+    .filter((order) => order.status !== "delivered" && order.code && order.client && order.address)
     .sort((a, b) => {
       const urgentScore = Number(b.priority === "urgent") - Number(a.priority === "urgent");
       return urgentScore || statusIndex(a.status) - statusIndex(b.status) || b.updatedAt - a.updatedAt;
@@ -730,6 +730,16 @@ function buildPlannerRoutes(stops, availableRiders) {
   }));
 }
 
+function hasDraftOrder() {
+  const form = qs("#new-order-form");
+  const data = new FormData(form);
+  return Boolean(
+    String(data.get("code") || "").trim()
+      || String(data.get("client") || "").trim()
+      || String(data.get("address") || "").trim()
+  );
+}
+
 async function planShopRoutes() {
   const button = qs("#plan-routes");
   const status = qs("#planner-status");
@@ -754,6 +764,17 @@ async function planShopRoutes() {
     const orders = activePlannerOrders();
 
     if (!orders.length) {
+      if (hasDraftOrder()) {
+        const shouldCreate = window.confirm("Hai una consegna compilata ma non ancora salvata. Vuoi crearla e poi pianificare?");
+        if (shouldCreate) {
+          const created = await createOrder(qs("#new-order-form"), { silentSuccess: true });
+          if (created) {
+            await refreshOrders({ silent: true, reportErrors: false });
+            return planShopRoutes();
+          }
+        }
+      }
+
       alert("Non ci sono ordini aperti da pianificare. Controlla che non siano gia consegnati o annullati.");
       status.textContent = "Nessun ordine aperto da pianificare.";
       return;
@@ -1567,21 +1588,28 @@ async function cancelShopOrder(order) {
   renderAll();
 }
 
-async function createOrder(form) {
+async function createOrder(form, options = {}) {
   const data = new FormData(form);
   const orders = state.orders;
   const code = String(data.get("code")).trim().toUpperCase();
+  const client = String(data.get("client")).trim();
+  const address = String(data.get("address")).trim();
+
+  if (!code || !client || !address) {
+    alert("Per creare la consegna servono almeno ordine, cliente e indirizzo.");
+    return false;
+  }
 
   if (orders.some((order) => order.code.toUpperCase() === code)) {
     alert("Questo numero ordine esiste gia.");
-    return;
+    return false;
   }
 
   const order = {
     code,
-    client: String(data.get("client")).trim(),
+    client,
     phone: String(data.get("phone")).trim(),
-    address: String(data.get("address")).trim(),
+    address,
     rider: String(data.get("rider")),
     notes: String(data.get("notes") || "").trim(),
     priority: String(data.get("priority") || "normal"),
@@ -1596,7 +1624,7 @@ async function createOrder(form) {
         clearShopSession();
         renderAll();
         alert("Accesso negozio scaduto. Entra di nuovo e riprova.");
-        return;
+        return false;
       }
 
       const created = await supabaseRpc("create_shop_order_v2", {
@@ -1624,15 +1652,15 @@ async function createOrder(form) {
       saveCustomerDirectory([customerFromOrder(order), ...state.customers]);
       await saveShopCustomerOnline(order);
       await refreshOrders();
-      alert(`Ordine ${order.code} creato.`);
-      return;
+      if (!options.silentSuccess) alert(`Ordine ${order.code} creato.`);
+      return true;
     } catch (error) {
       if (error.status === 409 || String(error.message).toLowerCase().includes("duplicate")) {
         alert(`Ordine ${order.code} gia esistente. Usa un numero ordine nuovo oppure modifica quello esistente.`);
       } else {
         alert(`Ordine non creato: ${error.message || "riprova tra poco."}`);
       }
-      return;
+      return false;
     }
   }
 
@@ -1644,7 +1672,8 @@ async function createOrder(form) {
   state.shopFilter = "active";
   form.reset();
   renderAll();
-  alert(`Ordine ${order.code} creato.`);
+  if (!options.silentSuccess) alert(`Ordine ${order.code} creato.`);
+  return true;
 }
 
 function bootFromUrl() {
@@ -1795,9 +1824,9 @@ function bindEvents() {
   qs("#plan-routes").addEventListener("click", planShopRoutes);
   qs("#apply-plan").addEventListener("click", applyShopPlan);
 
-  qs("#new-order-form").addEventListener("submit", (event) => {
+  qs("#new-order-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    createOrder(event.currentTarget);
+    await createOrder(event.currentTarget);
   });
 
   qs("#reset-demo").addEventListener("click", () => {

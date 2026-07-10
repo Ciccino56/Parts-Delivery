@@ -1,4 +1,4 @@
-const CACHE_NAME = "ricambi-delivery-v29";
+const CACHE_NAME = "ricambi-delivery-v30";
 const APP_FILES = [
   "./",
   "./index.html",
