@@ -8,6 +8,9 @@ create table if not exists staff_users (
 );
 
 alter table staff_users add column if not exists user_id uuid;
+alter table orders add column if not exists delivery_notes text;
+alter table orders add column if not exists priority text not null default 'normal' check (priority in ('normal', 'urgent'));
+alter table orders add column if not exists payment_status text not null default 'unknown' check (payment_status in ('unknown', 'paid', 'collect'));
 
 create table if not exists rider_access (
   id uuid primary key default gen_random_uuid(),
@@ -264,6 +267,95 @@ revoke all on function update_shop_order(text, text, text, text, text) from publ
 revoke all on function delete_shop_order(text) from public;
 grant execute on function update_shop_order(text, text, text, text, text) to authenticated;
 grant execute on function delete_shop_order(text) to authenticated;
+
+create or replace function create_shop_order_v2(
+  p_code text,
+  p_customer_name text,
+  p_customer_phone text,
+  p_delivery_address text,
+  p_rider_name text,
+  p_delivery_notes text default null,
+  p_priority text default 'normal',
+  p_payment_status text default 'unknown'
+)
+returns setof orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_shop_user() then
+    return;
+  end if;
+
+  return query
+  insert into orders (
+    code,
+    customer_name,
+    customer_phone,
+    delivery_address,
+    rider_name,
+    status,
+    delivery_notes,
+    priority,
+    payment_status,
+    updated_at
+  ) values (
+    upper(trim(p_code)),
+    trim(p_customer_name),
+    nullif(trim(p_customer_phone), ''),
+    trim(p_delivery_address),
+    trim(p_rider_name),
+    'created',
+    nullif(trim(coalesce(p_delivery_notes, '')), ''),
+    coalesce(nullif(trim(p_priority), ''), 'normal'),
+    coalesce(nullif(trim(p_payment_status), ''), 'unknown'),
+    now()
+  )
+  returning *;
+end;
+$$;
+
+create or replace function update_shop_order_v2(
+  p_code text,
+  p_customer_name text default null,
+  p_customer_phone text default null,
+  p_delivery_address text default null,
+  p_rider_name text default null,
+  p_delivery_notes text default null,
+  p_priority text default null,
+  p_payment_status text default null
+)
+returns setof orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_shop_user() then
+    return;
+  end if;
+
+  return query
+  update orders
+  set
+    customer_name = coalesce(nullif(trim(p_customer_name), ''), orders.customer_name),
+    customer_phone = coalesce(nullif(trim(p_customer_phone), ''), orders.customer_phone),
+    delivery_address = coalesce(nullif(trim(p_delivery_address), ''), orders.delivery_address),
+    rider_name = coalesce(nullif(trim(p_rider_name), ''), orders.rider_name),
+    delivery_notes = nullif(trim(coalesce(p_delivery_notes, orders.delivery_notes, '')), ''),
+    priority = coalesce(nullif(trim(p_priority), ''), orders.priority),
+    payment_status = coalesce(nullif(trim(p_payment_status), ''), orders.payment_status),
+    updated_at = now()
+  where upper(orders.code) = upper(trim(p_code))
+  returning orders.*;
+end;
+$$;
+
+revoke all on function create_shop_order_v2(text, text, text, text, text, text, text, text) from public;
+revoke all on function update_shop_order_v2(text, text, text, text, text, text, text, text) from public;
+grant execute on function create_shop_order_v2(text, text, text, text, text, text, text, text) to authenticated;
+grant execute on function update_shop_order_v2(text, text, text, text, text, text, text, text) to authenticated;
 
 drop policy if exists orders_demo_select on orders;
 drop policy if exists orders_demo_insert on orders;

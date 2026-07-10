@@ -192,6 +192,9 @@ function mapSupabaseOrder(row) {
     address: row.delivery_address,
     rider: row.rider_name || "Da assegnare",
     status: row.status,
+    notes: row.delivery_notes || "",
+    priority: row.priority || "normal",
+    paymentStatus: row.payment_status || "unknown",
     updatedAt: Date.parse(row.updated_at || row.created_at || new Date().toISOString()),
     lat: row.last_lat === null || row.last_lat === undefined ? null : Number(row.last_lat),
     lng: row.last_lng === null || row.last_lng === undefined ? null : Number(row.last_lng),
@@ -363,6 +366,16 @@ function hasLiveLocation(order) {
 
 function isSharingLocationFor(code) {
   return state.locationSharing?.code === code;
+}
+
+function priorityLabel(value) {
+  return value === "urgent" ? "Urgente" : "Normale";
+}
+
+function paymentLabel(value) {
+  if (value === "paid") return "Pagato";
+  if (value === "collect") return "Da incassare";
+  return "Pagamento n/d";
 }
 
 function routeCacheKey(prefix, parts) {
@@ -603,6 +616,9 @@ function renderShop() {
       order.phone,
       order.address,
       order.rider,
+      order.notes,
+      priorityLabel(order.priority),
+      paymentLabel(order.paymentStatus),
       statusMeta(order.status).label
     ].join(" ").toLowerCase();
 
@@ -645,7 +661,12 @@ function renderOrderCard(order, mode) {
   const metaRow = qs(".meta-row", card);
   metaRow.append(createPill(`Rider: ${order.rider}`));
   metaRow.append(createPill(`Aggiornato: ${timeAgo(order.updatedAt)}`));
+  if (order.priority === "urgent") metaRow.append(createPill("Priorita: urgente", "urgent"));
+  if (order.paymentStatus && order.paymentStatus !== "unknown") {
+    metaRow.append(createPill(paymentLabel(order.paymentStatus)));
+  }
   metaRow.append(createPill(hasLiveLocation(order) ? `GPS: ${timeAgo(order.locationAt)}` : "GPS: in attesa"));
+  if (order.notes) metaRow.append(createPill(`Note: ${order.notes}`));
   if (mode === "customer" && state.customer) {
     metaRow.append(createPill(`Cliente: ${state.customer.name}`));
   }
@@ -661,9 +682,9 @@ function renderOrderCard(order, mode) {
   return card;
 }
 
-function createPill(text) {
+function createPill(text, variant = "") {
   const pill = document.createElement("span");
-  pill.className = "pill";
+  pill.className = `pill ${variant}`.trim();
   pill.textContent = text;
   return pill;
 }
@@ -1000,12 +1021,15 @@ async function updateShopOrder(order, patch) {
     }
 
     try {
-      const updated = await supabaseRpc("update_shop_order", {
+      const updated = await supabaseRpc("update_shop_order_v2", {
         p_code: order.code,
         p_customer_name: patch.client || null,
         p_customer_phone: patch.phone || null,
         p_delivery_address: patch.address || null,
-        p_rider_name: patch.rider || null
+        p_rider_name: patch.rider || null,
+        p_delivery_notes: patch.notes ?? null,
+        p_priority: patch.priority || null,
+        p_payment_status: patch.paymentStatus || null
       }, {
         accessToken: state.shopSession.access_token
       });
@@ -1040,11 +1064,23 @@ async function editShopOrder(order) {
   const rider = window.prompt(`Rider (${riders.join(", ")})`, order.rider);
   if (rider === null) return;
 
+  const priority = window.prompt("Priorita: normal oppure urgent", order.priority || "normal");
+  if (priority === null) return;
+
+  const paymentStatus = window.prompt("Pagamento: unknown, paid oppure collect", order.paymentStatus || "unknown");
+  if (paymentStatus === null) return;
+
+  const notes = window.prompt("Note consegna", order.notes || "");
+  if (notes === null) return;
+
   await updateShopOrder(order, {
     client: client.trim(),
     phone: phone.trim(),
     address: address.trim(),
-    rider: rider.trim()
+    rider: rider.trim(),
+    priority: priority.trim(),
+    paymentStatus: paymentStatus.trim(),
+    notes: notes.trim()
   });
 }
 
@@ -1097,6 +1133,9 @@ async function createOrder(form) {
     phone: String(data.get("phone")).trim(),
     address: String(data.get("address")).trim(),
     rider: String(data.get("rider")),
+    notes: String(data.get("notes") || "").trim(),
+    priority: String(data.get("priority") || "normal"),
+    paymentStatus: String(data.get("payment") || "unknown"),
     status: "created",
     updatedAt: Date.now()
   };
@@ -1110,12 +1149,15 @@ async function createOrder(form) {
         return;
       }
 
-      const created = await supabaseRpc("create_shop_order", {
+      const created = await supabaseRpc("create_shop_order_v2", {
         p_code: order.code,
         p_customer_name: order.client,
         p_customer_phone: order.phone || "",
         p_delivery_address: order.address,
-        p_rider_name: order.rider
+        p_rider_name: order.rider,
+        p_delivery_notes: order.notes || "",
+        p_priority: order.priority,
+        p_payment_status: order.paymentStatus
       }, {
         accessToken: state.shopSession.access_token
       });

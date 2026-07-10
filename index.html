@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#111827">
     <title>Ricambi Delivery</title>
-    <link rel="manifest" href="manifest.json?v=24">
+    <link rel="manifest" href="manifest.json?v=25">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=24">
+    <link rel="stylesheet" href="styles.css?v=25">
   </head>
   <body>
     <main class="app-shell">
@@ -158,6 +158,25 @@
               <label for="new-rider">Rider</label>
               <select id="new-rider" name="rider" required></select>
             </div>
+            <div>
+              <label for="new-priority">Priorita</label>
+              <select id="new-priority" name="priority">
+                <option value="normal">Normale</option>
+                <option value="urgent">Urgente</option>
+              </select>
+            </div>
+            <div>
+              <label for="new-payment">Pagamento</label>
+              <select id="new-payment" name="payment">
+                <option value="unknown">Non indicato</option>
+                <option value="paid">Pagato</option>
+                <option value="collect">Da incassare</option>
+              </select>
+            </div>
+            <div class="form-wide">
+              <label for="new-notes">Note consegna</label>
+              <textarea id="new-notes" name="notes" rows="3" placeholder="Es. chiama prima, referente, citofono, ricambi fragili"></textarea>
+            </div>
             <button type="submit">Crea consegna</button>
           </form>
 
@@ -210,8 +229,8 @@
       </article>
     </template>
 
-    <script src="config.js?v=24"></script>
+    <script src="config.js?v=25"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=24"></script>
+    <script src="app.js?v=25"></script>
   </body>
 </html>
