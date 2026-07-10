@@ -302,10 +302,14 @@ select {
 
 .section-head {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin: 18px 0 12px;
+}
+
+.protected-area {
+  margin-top: 64px;
 }
 
 .head-actions {
