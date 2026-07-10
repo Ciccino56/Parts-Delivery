@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#111827">
     <title>Ricambi Delivery</title>
-    <link rel="manifest" href="manifest.json?v=30">
+    <link rel="manifest" href="manifest.json?v=32">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=30">
+    <link rel="stylesheet" href="styles.css?v=32">
   </head>
   <body>
     <main class="app-shell">
@@ -156,8 +156,12 @@
               <input id="new-address" name="address" placeholder="Via Roma 12, Caserta" required>
             </div>
             <div>
-              <label for="new-rider">Rider</label>
-              <select id="new-rider" name="rider" required></select>
+              <label for="new-branch">Filiale partenza</label>
+              <select id="new-branch" name="branch" required></select>
+            </div>
+            <div>
+              <label>Rider possibili</label>
+              <div class="check-grid compact" id="new-rider-options"></div>
             </div>
             <div>
               <label for="new-priority">Priorita</label>
@@ -258,8 +262,8 @@
       </article>
     </template>
 
-    <script src="config.js?v=30"></script>
+    <script src="config.js?v=32"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=30"></script>
+    <script src="app.js?v=32"></script>
   </body>
 </html>

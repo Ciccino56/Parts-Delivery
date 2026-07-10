@@ -14,11 +14,24 @@ const statuses = [
   { key: "delivered", label: "Consegnato", progress: 100 }
 ];
 
-const shopLocation = {
-  label: "Negozio",
-  lat: 41.0723,
-  lng: 14.3320
-};
+const branches = [
+  {
+    key: "poggioreale",
+    label: "Poggioreale",
+    address: "Via Nuova Poggioreale 48a, 80143 Napoli",
+    lat: 40.8615,
+    lng: 14.2857
+  },
+  {
+    key: "vomero",
+    label: "Vomero",
+    address: "Via Luigi Caldieri 146/148, Napoli",
+    lat: 40.8483,
+    lng: 14.2201
+  }
+];
+
+const shopLocation = branches[0];
 
 const seedOrders = [
   {
@@ -517,6 +530,20 @@ function paymentLabel(value) {
   return "Pagamento n/d";
 }
 
+function branchByKey(key) {
+  return branches.find((branch) => branch.key === key) || branches[0];
+}
+
+function branchFromOrder(order) {
+  const match = String(order.notes || "").match(/Filiale:\s*([^|]+)/i);
+  if (!match) return branches[0];
+
+  const value = match[1].trim().toLowerCase();
+  return branches.find((branch) => (
+    branch.key === value || branch.label.toLowerCase() === value
+  )) || branches[0];
+}
+
 function plannedStep(order) {
   const match = String(order.notes || "").match(/Giro:\s*([^,|]+),\s*tappa\s*(\d+)/i);
   return {
@@ -640,6 +667,10 @@ function selectedPlannerRiders() {
   return qsa("#planner-riders input:checked").map((input) => input.value);
 }
 
+function selectedOrderRiders() {
+  return qsa("#new-rider-options input:checked").map((input) => input.value);
+}
+
 function plannerDepotStops() {
   return qs("#planner-depots").value
     .split(/\r?\n/)
@@ -672,6 +703,27 @@ function routeDistance(from, to) {
   return distanceInMeters(from, to) * 1.35;
 }
 
+function eligibleRidersForOrder(order, availableRiders) {
+  const match = String(order.notes || "").match(/Rider possibili:\s*([^|]+)/i);
+  const preferred = match
+    ? match[1].split(",").map((name) => name.trim()).filter(Boolean)
+    : [];
+  const eligible = preferred.filter((rider) => availableRiders.includes(rider));
+
+  if (eligible.length) return eligible;
+  if (availableRiders.includes(order.rider)) return [order.rider];
+  return availableRiders;
+}
+
+function routeCanTakeStop(route, stop, availableRiders) {
+  if (stop.type !== "delivery") return true;
+  return eligibleRidersForOrder(stop.order, availableRiders).includes(route.rider);
+}
+
+function startLocationForStop(stop) {
+  return stop.type === "delivery" ? branchFromOrder(stop.order) : shopLocation;
+}
+
 function nearestPlannerOrder(stops, startLocation) {
   const urgentStops = stops.filter((stop) => stop.priority === "urgent");
   const pool = urgentStops.length ? urgentStops : stops;
@@ -685,7 +737,7 @@ function nearestPlannerOrder(stops, startLocation) {
 function orderPlannerStops(stops) {
   const remaining = [...stops];
   const ordered = [];
-  let cursor = shopLocation;
+  let cursor = remaining[0] ? startLocationForStop(remaining[0]) : shopLocation;
 
   while (remaining.length) {
     const next = nearestPlannerOrder(remaining, cursor) || remaining[0];
@@ -702,7 +754,7 @@ function buildPlannerRoutes(stops, availableRiders) {
     rider,
     stops: [],
     distance: 0,
-    cursor: shopLocation
+    cursor: null
   }));
 
   const orderedStops = [
@@ -711,8 +763,10 @@ function buildPlannerRoutes(stops, availableRiders) {
   ];
 
   orderedStops.forEach((stop) => {
-    const bestRoute = routes.reduce((best, route) => {
-      const leg = routeDistance(route.cursor, stop.location);
+    const routePool = routes.filter((route) => routeCanTakeStop(route, stop, availableRiders));
+    const bestRoute = (routePool.length ? routePool : routes).reduce((best, route) => {
+      const start = route.cursor || startLocationForStop(stop);
+      const leg = routeDistance(start, stop.location);
       const loadPenalty = route.stops.length * 1800;
       const score = route.distance + leg + loadPenalty;
       return !best || score < best.score ? { route, leg, score } : best;
@@ -848,9 +902,10 @@ function renderPlannerResult() {
     route.stops.forEach((stop) => {
       const item = document.createElement("li");
       const tag = stop.priority === "urgent" ? "Urgente" : stop.type === "deposit" ? "Deposito" : "Consegna";
+      const branchText = stop.type === "delivery" ? `${branchFromOrder(stop.order).label} - ` : "";
       const title = document.createTextNode(plannerStopTitle(stop));
       const detail = document.createElement("small");
-      detail.textContent = `${tag} - ${stop.address}`;
+      detail.textContent = `${tag} - ${branchText}${stop.address}`;
       item.append(title, detail);
       list.append(item);
     });
@@ -861,7 +916,10 @@ function renderPlannerResult() {
 }
 
 function appendPlanNote(existing, rider, index) {
-  const clean = String(existing || "").replace(/\s*Giro:\s*[^|]+(\|\s*)?/i, "").trim();
+  const clean = String(existing || "")
+    .replace(/\s*Giro:\s*[^|]+(\|\s*)?/i, "")
+    .replace(/\s*Rider possibili:\s*[^|]+(\|\s*)?/i, "")
+    .trim();
   const note = `Giro: ${rider}, tappa ${index}`;
   return clean ? `${note} | ${clean}` : note;
 }
@@ -905,17 +963,33 @@ function setActiveView(view) {
 
 function renderRiderOptions() {
   const filter = qs("#rider-filter");
-  const select = qs("#new-rider");
+  const orderOptions = qs("#new-rider-options");
 
   filter.innerHTML = '<option value="all">Tutti</option>';
-  select.innerHTML = "";
+  if (orderOptions && !orderOptions.children.length) {
+    orderOptions.innerHTML = "";
+  }
 
   riders.forEach((rider) => {
     filter.append(new Option(rider, rider));
-    select.append(new Option(rider, rider));
+    if (orderOptions && !orderOptions.querySelector(`input[value="${rider}"]`)) {
+      const label = document.createElement("label");
+      label.className = "check-pill";
+      label.innerHTML = `<input type="checkbox" value="${rider}" checked> <span>${rider}</span>`;
+      orderOptions.append(label);
+    }
   });
 
   filter.value = state.riderFilter;
+}
+
+function renderBranchOptions() {
+  const select = qs("#new-branch");
+  if (!select || select.children.length) return;
+
+  branches.forEach((branch) => {
+    select.append(new Option(`${branch.label} - ${branch.address}`, branch.key));
+  });
 }
 
 function renderCustomerDirectoryOptions() {
@@ -947,6 +1021,7 @@ function renderPlannerRiders() {
 
 function renderAll() {
   renderRiderOptions();
+  renderBranchOptions();
   renderCustomerDirectoryOptions();
   renderPlannerRiders();
   renderCustomerLogin();
@@ -1122,6 +1197,7 @@ function renderOrderCard(order, mode) {
   if (order.paymentStatus && order.paymentStatus !== "unknown") {
     metaRow.append(createPill(paymentLabel(order.paymentStatus)));
   }
+  metaRow.append(createPill(`Filiale: ${branchFromOrder(order).label}`));
   metaRow.append(createPill(hasLiveLocation(order) ? `GPS: ${timeAgo(order.locationAt)}` : "GPS: in attesa"));
   if (order.notes) metaRow.append(createPill(`Note: ${order.notes}`));
   if (mode === "customer" && state.customer) {
@@ -1201,7 +1277,8 @@ function renderLiveMap(container, order) {
   if (!window.L) return;
 
   const hasLocation = hasLiveLocation(order);
-  const riderLocation = hasLocation ? [order.lat, order.lng] : [shopLocation.lat, shopLocation.lng];
+  const branch = branchFromOrder(order);
+  const riderLocation = hasLocation ? [order.lat, order.lng] : [branch.lat, branch.lng];
 
   container.classList.add("live-map");
   container.innerHTML = "";
@@ -1224,13 +1301,13 @@ function renderLiveMap(container, order) {
       maxZoom: 19
     }).addTo(map);
 
-    L.circleMarker([shopLocation.lat, shopLocation.lng], {
+    L.circleMarker([branch.lat, branch.lng], {
       radius: 8,
       color: "#111827",
       fillColor: "#111827",
       fillOpacity: 1,
       weight: 2
-    }).addTo(map).bindTooltip("Negozio");
+    }).addTo(map).bindTooltip(branch.label);
 
     if (hasLocation) {
       L.circleMarker(riderLocation, {
@@ -1594,9 +1671,16 @@ async function createOrder(form, options = {}) {
   const code = String(data.get("code")).trim().toUpperCase();
   const client = String(data.get("client")).trim();
   const address = String(data.get("address")).trim();
+  const possibleRiders = selectedOrderRiders();
+  const branch = branchByKey(String(data.get("branch") || branches[0].key));
 
   if (!code || !client || !address) {
     alert("Per creare la consegna servono almeno ordine, cliente e indirizzo.");
+    return false;
+  }
+
+  if (!possibleRiders.length) {
+    alert("Seleziona almeno un rider possibile per questa consegna.");
     return false;
   }
 
@@ -1610,8 +1694,12 @@ async function createOrder(form, options = {}) {
     client,
     phone: String(data.get("phone")).trim(),
     address,
-    rider: String(data.get("rider")),
-    notes: String(data.get("notes") || "").trim(),
+    rider: possibleRiders.length === 1 ? possibleRiders[0] : "Da assegnare",
+    notes: [
+      `Filiale: ${branch.label}`,
+      `Rider possibili: ${possibleRiders.join(", ")}`,
+      String(data.get("notes") || "").trim()
+    ].filter(Boolean).join(" | "),
     priority: String(data.get("priority") || "normal"),
     paymentStatus: String(data.get("payment") || "unknown"),
     status: "created",
