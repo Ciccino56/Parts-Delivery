@@ -163,7 +163,38 @@ async function supabaseAuth(path, body) {
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase auth error ${response.status}`);
+    let message = "Accesso non riuscito. Controlla email e password.";
+
+    try {
+      const payload = await response.json();
+      const rawMessage = [
+        payload.error_description,
+        payload.message,
+        payload.msg,
+        payload.error
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const normalized = rawMessage.toLowerCase();
+
+      if (
+        normalized.includes("invalid") ||
+        normalized.includes("credential") ||
+        normalized.includes("login")
+      ) {
+        message = "Email o password non corrette.";
+      } else if (rawMessage) {
+        message = rawMessage;
+      }
+    } catch {
+      if (response.status === 400) {
+        message = "Email o password non corrette.";
+      }
+    }
+
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   return response.json();

@@ -213,6 +213,10 @@ input:disabled {
   gap: 12px;
 }
 
+#shop-login-form button {
+  min-width: 116px;
+}
+
 .form-error {
   grid-column: 1 / -1;
   margin: -2px 0 0;
@@ -622,6 +626,11 @@ textarea {
 
   .pin-form {
     grid-template-columns: 1fr auto;
+  }
+
+  #shop-login-form {
+    grid-template-columns: minmax(220px, 1fr) minmax(200px, 1fr) auto;
+    align-items: end;
   }
 
   .order-form button {
